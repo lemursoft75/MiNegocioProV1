@@ -18,11 +18,13 @@ if not firebase_admin._apps:
 # Cliente Firestore
 db = firestore.client()
 
-# 🚀 Funciones para guardar datos
+# --- Funciones para guardar datos ---
 
 def guardar_venta(venta_dict):
     """Guarda la venta y la registra como ingreso contable"""
     db.collection("ventas").add(venta_dict)
+    # Considera si este ingreso automático debe ser 'Total' o 'Monto Contado'
+    # Actualmente registra el Total de la venta como ingreso contable general.
     registrar_ingreso_automatico(venta_dict)
 
 def guardar_cliente(cliente_dict):
@@ -33,6 +35,7 @@ def guardar_cliente(cliente_dict):
 def guardar_transaccion(transaccion_dict):
     """Agrega una transacción contable a la colección 'transacciones'"""
     db.collection("transacciones").add(transaccion_dict)
+
 
 def registrar_pago_cobranza(cliente, monto, metodo_pago, fecha, descripcion=""):
     pago_dict = {
@@ -47,41 +50,79 @@ def registrar_pago_cobranza(cliente, monto, metodo_pago, fecha, descripcion=""):
     db.collection("transacciones").add(pago_dict)
 
 
-
 def guardar_producto(producto_dict):
     """Agrega un nuevo producto a la colección 'productos'"""
     db.collection("productos").add(producto_dict)
 
-# 📥 Funciones para leer datos
-
+# --- Funciones para leer datos ---
 def leer_ventas():
-    """Lee todas las ventas guardadas en Firestore con estructura uniforme"""
+    """
+    Lee todas las ventas guardadas en Firestore, asegurando una estructura uniforme
+    y la conversión de columnas numéricas a un tipo numérico (float).
+    """
     docs = db.collection("ventas").stream()
     ventas = []
-    columnas = ["Fecha", "Cliente", "Producto", "Cantidad", "Precio Unitario", "Total", "Método de pago",
-                "Tipo de venta"]
+    # ¡AQUÍ ESTÁ LA MODIFICACIÓN CLAVE!
+    # Se añaden 'Monto Contado' y 'Anticipo Aplicado' a las columnas esperadas.
+    columnas = [
+        "Fecha", "Cliente", "Producto", "Cantidad", "Precio Unitario", "Total",
+        "Monto Crédito", "Monto Contado", "Anticipo Aplicado", # Nuevas columnas
+        "Método de pago", "Tipo de venta"
+    ]
 
     for doc in docs:
         data = doc.to_dict()
-        venta_normalizada = {col: data.get(col, "") for col in columnas}
+        venta_normalizada = {col: data.get(col, None) for col in columnas}
         ventas.append(venta_normalizada)
 
-    return ventas
+    if not ventas:
+        df = pd.DataFrame(columns=columnas)
+    else:
+        df = pd.DataFrame(ventas)
+        # Asegurar que todas las columnas existan, si no se obtuvieron de Firestore
+        for col in columnas:
+            if col not in df.columns:
+                df[col] = None
+
+        # Convertir explícitamente columnas numéricas a float,
+        # convirtiendo errores a NaN y luego a 0.0.
+        # ¡IMPORTANTE! Asegúrate de que estas nuevas columnas también sean numéricas.
+        numeric_cols = ["Cantidad", "Precio Unitario", "Total", "Monto Crédito", "Monto Contado", "Anticipo Aplicado"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+
+        # Reordenar las columnas según lo definido
+        df = df[columnas]
+
+    return df
 
 
 def leer_transacciones():
-    """Lee todas las transacciones contables guardadas en Firestore"""
     docs = db.collection("transacciones").stream()
     transacciones = []
     columnas = ["Fecha", "Descripción", "Categoría", "Tipo", "Monto", "Cliente", "Método de pago"]
 
     for doc in docs:
         data = doc.to_dict()
-        transaccion_normalizada = {col: data.get(col, "") for col in columnas}
+        transaccion_normalizada = {col: data.get(col, None) for col in columnas} # Usar None
         transacciones.append(transaccion_normalizada)
 
-    return transacciones
+    if not transacciones:
+        df = pd.DataFrame(columns=columnas)
+    else:
+        df = pd.DataFrame(transacciones)
+        for col in columnas:
+            if col not in df.columns:
+                df[col] = None
 
+        # Convertir 'Monto' a numérico
+        if "Monto" in df.columns:
+            df["Monto"] = pd.to_numeric(df["Monto"], errors='coerce').fillna(0.0)
+
+        df = df[columnas]
+
+    return df
 
 
 def leer_cobranza():
@@ -92,33 +133,49 @@ def leer_cobranza():
 
     for doc in docs:
         data = doc.to_dict()
-        registro = {col: data.get(col, "") for col in columnas}
+        registro = {col: data.get(col, None) for col in columnas} # Usar None
         cobranza.append(registro)
 
-    return cobranza
+    df = pd.DataFrame(cobranza)
+    # Asegurarse de que 'Monto' sea numérico para la cobranza también
+    if "Monto" in df.columns:
+        df["Monto"] = pd.to_numeric(df["Monto"], errors='coerce').fillna(0.0)
+
+    return df
 
 
 def calcular_balance_contable():
     transacciones = leer_transacciones()
-    df = pd.DataFrame(transacciones)
-    ingresos = df.query("Tipo == 'Ingreso'")["Monto"].sum()
-    gastos = df.query("Tipo == 'Gasto'")["Monto"].sum()
+    # Asegúrate de que 'Monto' ya es numérico gracias a leer_transacciones
+    ingresos = transacciones.query("Tipo == 'Ingreso'")["Monto"].sum()
+    gastos = transacciones.query("Tipo == 'Gasto'")["Monto"].sum()
     balance = ingresos - gastos
     return ingresos, gastos, balance
 
 
 def leer_clientes():
-    """Lee todos los clientes registrados en Firestore con estructura uniforme"""
     docs = db.collection("clientes").stream()
     clientes = []
-    columnas = ["Nombre", "Correo", "Teléfono", "Dirección", "RFC"]
+    columnas = ["Nombre", "Correo", "Teléfono", "Dirección", "RFC", "Límite de crédito"]
 
     for doc in docs:
         data = doc.to_dict()
-        cliente_normalizado = {col: data.get(col, "") for col in columnas}
+        cliente_normalizado = {col: data.get(col, None) for col in columnas} # Usar None
         clientes.append(cliente_normalizado)
 
-    return clientes
+    df = pd.DataFrame(clientes)
+    if not clientes: # Si no hay clientes, el DF estará vacío, asegurar columnas
+        df = pd.DataFrame(columns=columnas)
+    else:
+        for col in columnas:
+            if col not in df.columns:
+                df[col] = None # Asegurar que las columnas existen
+
+    # Convertir 'Límite de crédito' a numérico
+    if "Límite de crédito" in df.columns:
+        df["Límite de crédito"] = pd.to_numeric(df["Límite de crédito"], errors='coerce').fillna(0.0)
+
+    return df
 
 
 def leer_productos():
@@ -129,11 +186,24 @@ def leer_productos():
 
     for doc in docs:
         data = doc.to_dict()
-        producto_normalizado = {col: data.get(col, "") for col in columnas}
+        producto_normalizado = {col: data.get(col, None) for col in columnas} # Usar None
         productos.append(producto_normalizado)
 
-    return productos
+    df = pd.DataFrame(productos)
+    if not productos: # Si no hay productos, el DF estará vacío, asegurar columnas
+        df = pd.DataFrame(columns=columnas)
+    else:
+        for col in columnas:
+            if col not in df.columns:
+                df[col] = None # Asegurar que las columnas existen
 
+    # Convertir 'Precio Unitario' y 'Cantidad' a numérico
+    numeric_cols = ["Precio Unitario", "Cantidad"]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+
+    return df
 
 
 # ✅ Actualizar un campo específico de un producto
@@ -159,7 +229,8 @@ def registrar_ingreso_automatico(venta_dict):
         "Descripción": f"Venta a {venta_dict.get('Cliente', 'Cliente desconocido')}",
         "Categoría": "Ventas",
         "Tipo": "Ingreso",
-        "Monto": venta_dict.get("Total", 0.0)
+        # Aseguramos que el Total sea un float aquí también
+        "Monto": float(venta_dict.get("Total", 0.0))
     }
     db.collection("transacciones").add(ingreso)
 

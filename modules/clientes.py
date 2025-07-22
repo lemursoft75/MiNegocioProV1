@@ -1,4 +1,3 @@
-# modules/clientes.py
 import streamlit as st
 import pandas as pd
 from utils.db import guardar_cliente, leer_clientes
@@ -17,6 +16,8 @@ def render():
         telefono = st.text_input("Teléfono")
         empresa = st.text_input("Empresa")
         rfc = st.text_input("RFC")
+        limite_credito = st.number_input("💳 Límite de crédito autorizado", min_value=0.0, step=100.0, format="%.2f")
+
         submitted = st.form_submit_button("Guardar cliente")
 
         if submitted:
@@ -25,7 +26,8 @@ def render():
                 "Correo": correo,
                 "Teléfono": telefono,
                 "Empresa": empresa,
-                "RFC": rfc
+                "RFC": rfc,
+                "Límite de crédito": limite_credito
             }
             guardar_cliente(nuevo_cliente)
             nuevo_df = pd.DataFrame([nuevo_cliente])

@@ -9,9 +9,18 @@ def render():
     st.title("🧾 Contabilidad")
 
     # Cargar transacciones desde Firestore
-    if "transacciones" not in st.session_state:
-        transacciones_data = leer_transacciones()
-        st.session_state.transacciones = pd.DataFrame(transacciones_data)
+    def render():
+        st.title("🧾 Contabilidad")
+
+        # Cargar transacciones desde Firestore
+        if "transacciones" not in st.session_state:
+            transacciones_data = leer_transacciones()
+            transacciones = pd.DataFrame(transacciones_data)
+            st.session_state.transacciones = transacciones
+
+            # Debug visual (opcional, puede comentarse luego)
+            st.write("Transacciones cargadas:", transacciones.head())
+            st.write("Columnas:", transacciones.columns.tolist())
 
     # Formulario contable
     with st.form("form_registro"):
