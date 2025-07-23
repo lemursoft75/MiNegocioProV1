@@ -1,5 +1,17 @@
 import streamlit as st
 from streamlit_option_menu import option_menu
+from dotenv import load_dotenv
+
+
+# Carga .env primero para que todas las variables de entorno estén disponibles
+load_dotenv()
+
+from utils import db
+
+# Inicializa Firebase ya con las variables cargadas
+db.inicializar_firebase()
+
+
 
 # 👉 Importar módulos
 from modules.clientes import render as render_clientes
@@ -10,7 +22,7 @@ from modules.productos import render as render_productos
 from modules.cobranza import render as render_cobranza
 
 
-st.set_page_config(page_title="Defontana PYME", layout="wide")
+st.set_page_config(page_title="Gestor Pymes", layout="wide")
 
 with open("assets/style.css") as f:
     st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)

@@ -5,30 +5,27 @@ import io
 import datetime
 from utils.db import guardar_transaccion, leer_transacciones, calcular_balance_contable
 
+
+
 def render():
     st.title("🧾 Contabilidad")
 
     # Cargar transacciones desde Firestore
-    def render():
-        st.title("🧾 Contabilidad")
+    # Se asegura que las transacciones se recarguen al entrar al módulo
+    transacciones_data = leer_transacciones()
+    st.session_state.transacciones = pd.DataFrame(transacciones_data)
 
-        # Cargar transacciones desde Firestore
-        if "transacciones" not in st.session_state:
-            transacciones_data = leer_transacciones()
-            transacciones = pd.DataFrame(transacciones_data)
-            st.session_state.transacciones = transacciones
-
-            # Debug visual (opcional, puede comentarse luego)
-            st.write("Transacciones cargadas:", transacciones.head())
-            st.write("Columnas:", transacciones.columns.tolist())
 
     # Formulario contable
     with st.form("form_registro"):
         st.subheader("Registrar nueva transacción")
         fecha = st.date_input("Fecha", value=datetime.date.today())
         descripcion = st.text_input("Descripción")
-        categoria = st.selectbox("Categoría", ["Ventas", "Servicios", "Compras", "Sueldos", "Otro"])
-        tipo = st.radio("Tipo", ["Ingreso", "Gasto"])
+        # Ampliamos las categorías para que coincidan con las posibles del sistema
+        categoria = st.selectbox("Categoría", ["Ventas", "Servicios", "Compras", "Sueldos", "Otro", "Cobranza", "Anticipo Cliente", "Anticipo Aplicado"])
+        # --- CAMBIO AQUÍ: "Gasto" por "Egreso" en la UI ---
+        tipo = st.radio("Tipo", ["Ingreso", "Egreso"])
+        # --- FIN DEL CAMBIO ---
         monto = st.number_input("Monto", min_value=0.0, format="%.2f")
         submitted = st.form_submit_button("Agregar")
 
@@ -37,16 +34,16 @@ def render():
                 "Fecha": fecha.isoformat(),
                 "Descripción": descripcion,
                 "Categoría": categoria,
-                "Tipo": tipo,
+                "Tipo": tipo, # Esto guardará "Ingreso" o "Egreso" directamente según lo seleccionado en UI
                 "Monto": float(monto)
             }
             guardar_transaccion(transaccion)
 
             # Recargar desde Firestore después de guardar
-            transacciones_actualizadas = leer_transacciones()
-            st.session_state.transacciones = pd.DataFrame(transacciones_actualizadas)
+            st.session_state.transacciones = pd.DataFrame(leer_transacciones())
 
             st.success("✅ Transacción guardada correctamente")
+            st.rerun() # Para refrescar los datos mostrados
 
     st.divider()
     st.subheader("📋 Histórico contable")
@@ -62,7 +59,9 @@ def render():
         ingresos, gastos, balance = calcular_balance_contable()
         col1, col2, col3 = st.columns(3)
         col1.metric("Ingresos", f"${ingresos:,.2f}")
-        col2.metric("Gastos", f"${gastos:,.2f}")
+        # --- CAMBIO AQUÍ: "Gastos" por "Egresos" en la UI ---
+        col2.metric("Egresos", f"${gastos:,.2f}")
+        # --- FIN DEL CAMBIO ---
         col3.metric("Balance neto", f"${balance:,.2f}")
 
         st.divider()
@@ -70,7 +69,7 @@ def render():
 
         resumen_tipo = st.session_state.transacciones.groupby("Tipo")["Monto"].sum().reset_index()
         fig = px.pie(resumen_tipo, names="Tipo", values="Monto",
-                     title="Ingresos vs Gastos", template="plotly_white")
+                     title="Ingresos vs Egresos", template="plotly_white") # Título actualizado
         st.plotly_chart(fig, use_container_width=True)
 
         st.subheader("📤 Exportar historial contable")

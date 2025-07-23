@@ -6,6 +6,7 @@ import plotly.express as px
 from utils.db import guardar_venta, leer_ventas, leer_transacciones, guardar_transaccion, leer_clientes, leer_productos
 
 
+
 def render():
     st.title("💸 Ventas")
 
@@ -32,9 +33,14 @@ def render():
         for col in numeric_cols_ventas:
             if col in st.session_state.ventas.columns:
                 st.session_state.ventas[col] = pd.to_numeric(st.session_state.ventas[col], errors='coerce').fillna(0.0)
+    else:
+        # Refrescar ventas cada vez que se renderiza para tener los últimos datos
+        st.session_state.ventas = leer_ventas()
+        for col in numeric_cols_ventas:
+            if col in st.session_state.ventas.columns:
+                st.session_state.ventas[col] = pd.to_numeric(st.session_state.ventas[col], errors='coerce').fillna(0.0)
 
     # Cargar transacciones_data al inicio para el cálculo de anticipos y crédito
-    # Asegúrate de que esto se recargue si el usuario vuelve a esta página o después de una acción relevante
     if "transacciones_data" not in st.session_state:
         st.session_state.transacciones_data = leer_transacciones()
         if "Monto" in st.session_state.transacciones_data.columns:
@@ -52,8 +58,25 @@ def render():
     # --- CAMPOS QUE DEBEN ACTUALIZARSE AL CAMBIAR SU VALOR (FUERA DEL FORM) ---
     fecha = st.date_input("Fecha", key="venta_fecha")
     cliente = st.selectbox("Cliente", st.session_state.clientes["Nombre"].tolist(), key="venta_cliente")
+
+    # --- CAMBIOS AQUÍ para mostrar la existencia ---
     producto = st.selectbox("Producto/Servicio", st.session_state.productos["Nombre"].tolist(), key="venta_producto")
+
+    existencia_actual = 0
+    if producto and not st.session_state.productos.empty:
+        producto_info = st.session_state.productos[st.session_state.productos["Nombre"] == producto]
+        if not producto_info.empty and "Cantidad" in producto_info.columns:
+            existencia_actual = int(producto_info["Cantidad"].values[0])
+        st.info(f"📦 Existencia actual: **{existencia_actual}** unidades.")
+    # --- FIN CAMBIOS para mostrar la existencia ---
+
     cantidad = st.number_input("Cantidad", min_value=1, key="venta_cantidad")
+
+    # Validar que la cantidad no exceda la existencia
+    if cantidad > existencia_actual and existencia_actual >= 0:  # Solo si hay existencia definida
+        st.warning(f"⚠️ La cantidad solicitada ({cantidad}) excede la existencia actual ({existencia_actual}).")
+        # Opcional: Deshabilitar el botón de submit o ajustar la cantidad automáticamente
+        # st.session_state.venta_cantidad = existencia_actual # Esto podría forzar la cantidad
 
     # Calcular precio y total EN TIEMPO REAL
     precio = 0.0
@@ -77,7 +100,7 @@ def render():
     anticipos_aplicados_total = st.session_state.transacciones_data[
         (st.session_state.transacciones_data["Categoría"] == "Anticipo Aplicado") &
         (st.session_state.transacciones_data["Cliente"] == cliente) &
-        (st.session_state.transacciones_data["Tipo"] == "Gasto")
+        (st.session_state.transacciones_data["Tipo"] == "Gasto")  # Asegúrate que esto sea consistente con tu db.py
         ]["Monto"].sum()
 
     saldo_anticipos = float(anticipos_cliente_total) - float(anticipos_aplicados_total)
@@ -115,8 +138,11 @@ def render():
             st.warning("⚠️ El límite de crédito del cliente no es válido. Se asignará 0.")
             limite_credito = 0.0
 
-        # transacciones_actuales ya está cargada y fresca al inicio de render()
-        # Usar st.session_state.transacciones_data para los cálculos de crédito
+        # Recargar ventas y transacciones dentro del form_submit_button
+        # para asegurar la consistencia en el momento de la validación final
+        # y antes de guardar. Esto ya lo tenías.
+        # st.session_state.ventas = leer_ventas() # Esto se hace justo antes de la validación
+        # st.session_state.transacciones_data = leer_transacciones() # Esto se hace justo antes de la validación
 
         # Filtrar pagos de cobranza para el cliente (para crédito)
         pagos = st.session_state.transacciones_data[  # Usar session_state.transacciones_data
@@ -155,44 +181,63 @@ def render():
         submitted = st.form_submit_button("Registrar venta")
 
         if submitted:
+            # Recargar productos y transacciones para la validación final y guardar
+            st.session_state.productos = leer_productos()  # ¡Importante para la existencia actual!
+            st.session_state.transacciones_data = leer_transacciones()  # ¡Importante para anticipos y crédito!
+
+            # Obtener la existencia actual actualizada
+            current_producto_info = st.session_state.productos[st.session_state.productos["Nombre"] == producto]
+            current_existencia = int(current_producto_info["Cantidad"].values[
+                                         0]) if not current_producto_info.empty and "Cantidad" in current_producto_info.columns else 0
+
             # Asegurarse de usar el anticipo que el usuario seleccionó en el number_input visible
             anticipo_final_aplicado = st.session_state.get("anticipo_seleccionado_para_venta", 0.0)
 
             # Recalcular el total ajustado con el anticipo final decidido por el usuario
-            total_ajustado_f = float(
-                total - anticipo_final_aplicado)  # This value is not directly used in the validation sum
+            total_ajustado_f = float(total - anticipo_final_aplicado)
 
             monto_contado_f = float(monto_contado)  # Usar el monto de contado del formulario
             monto_credito_f = float(monto_credito)  # Usar el monto de crédito calculado en el formulario
 
-            # --- DEBUGGING LINES START ---
-            st.write(f"DEBUG: Total Venta Original (total): {total}")
-            st.write(f"DEBUG: Monto Contado (monto_contado_f): {monto_contado_f}")
-            st.write(f"DEBUG: Monto Crédito (monto_credito_f): {monto_credito_f}")
-            st.write(f"DEBUG: Anticipo Aplicado (anticipo_final_aplicado): {anticipo_final_aplicado}")
+            # Recalcular crédito disponible con los datos más frescos
+            # Es vital recalcular esto AQUI antes de la validación
+            current_cliente_info = st.session_state.clientes[st.session_state.clientes["Nombre"] == cliente].iloc[0]
+            current_limite_credito = float(current_cliente_info.get("Límite de crédito", 0.0))
+
+            current_pagos = st.session_state.transacciones_data[
+                (st.session_state.transacciones_data["Categoría"] == "Cobranza") & (
+                        st.session_state.transacciones_data["Cliente"] == cliente)
+                ]
+            current_pagos_realizados = current_pagos["Monto"].sum() if not current_pagos.empty else 0.0
+
+            current_ventas_cliente = st.session_state.ventas[st.session_state.ventas["Cliente"] == cliente]
+            current_total_credito_otorgado = 0.0
+            if "Tipo de venta" in current_ventas_cliente.columns and "Monto Crédito" in current_ventas_cliente.columns:
+                current_credito_otorgado_series = current_ventas_cliente[
+                    current_ventas_cliente["Tipo de venta"].isin(["Crédito", "Mixta"])
+                ]["Monto Crédito"]
+                current_total_credito_otorgado = float(
+                    current_credito_otorgado_series.sum()) if not current_credito_otorgado_series.empty else 0.0
+
+            current_credito_usado = float(current_total_credito_otorgado) - float(current_pagos_realizados)
+            current_credito_disponible = float(current_limite_credito) - float(current_credito_usado)
 
             suma_componentes = monto_contado_f + monto_credito_f + anticipo_final_aplicado
-
-            st.write(f"DEBUG: Suma de Componentes (contado+credito+anticipo): {suma_componentes}")
-            st.write(f"DEBUG: Redondeado Suma: {round(suma_componentes, 2)}")
-            st.write(f"DEBUG: Redondeado Total Original: {round(total, 2)}")
-
-            # --- DEBUGGING LINES END ---
 
             # Definir una pequeña tolerancia para la comparación de punto flotante
             epsilon = 0.01  # Tolerancia de un centavo
 
             # Validaciones finales
-            # Usar abs() para comparar la diferencia con epsilon
-            if abs(round(suma_componentes, 2) - round(total, 2)) > epsilon:
+            if cantidad > current_existencia:  # Validar existencia nuevamente al momento de guardar
+                st.error(f"❌ No hay suficiente existencia de {producto}. Solo quedan {current_existencia} unidades.")
+            elif abs(round(suma_componentes, 2) - round(total, 2)) > epsilon:
                 st.error(
                     "❌ El total ingresado (contado + crédito + anticipo) no coincide con el total de la venta original. "
-                    f"Desfase: {abs(round(suma_componentes, 2) - round(total, 2)):.4f}"  # Mostrar el desfase
+                    f"Desfase: {abs(round(suma_componentes, 2) - round(total, 2)):.4f}"
                 )
-                # No se requiere rerun ni reset de estado aquí, el usuario puede corregir los inputs
-            elif monto_credito_f > credito_disponible + epsilon:  # Añadir epsilon aquí también para seguridad
+            elif monto_credito_f > current_credito_disponible + epsilon:  # Añadir epsilon aquí también para seguridad
                 st.error(
-                    f"❌ El crédito solicitado (${monto_credito_f:.2f}) excede el disponible (${credito_disponible:.2f}).")
+                    f"❌ El crédito solicitado (${monto_credito_f:.2f}) excede el disponible (${current_credito_disponible:.2f}).")
             else:
                 # Determinar Tipo de Venta correctamente
                 tipo_venta = ""
@@ -248,6 +293,14 @@ def render():
                         "Método de pago": "Anticipo"  # Método de pago específico
                     })
 
+                # --- DESCONTAR CANTIDAD DEL INVENTARIO ---
+                from utils.db import actualizar_producto_por_clave  # Importar aquí si no está global
+                producto_clave = \
+                st.session_state.productos.loc[st.session_state.productos["Nombre"] == producto, "Clave"].iloc[0]
+                nueva_cantidad_inventario = current_existencia - cantidad
+                actualizar_producto_por_clave(producto_clave, {"Cantidad": nueva_cantidad_inventario})
+                # --- FIN DESCUENTO INVENTARIO ---
+
                 nueva = pd.DataFrame([venta_dict])
                 st.session_state.ventas = pd.concat([st.session_state.ventas, nueva], ignore_index=True)
 
@@ -257,8 +310,9 @@ def render():
                                                                      errors='coerce').fillna(0.0)
 
                 st.success("✅ Venta registrada correctamente")
-                # Recargar transacciones_data para que el saldo de anticipos se actualice
+                # Recargar transacciones_data y productos para que el saldo de anticipos y existencia se actualicen en UI
                 st.session_state.transacciones_data = leer_transacciones()
+                st.session_state.productos = leer_productos()  # ¡Actualizar productos también!
                 st.rerun()  # Volver a renderizar para limpiar el formulario y mostrar la venta reciente
 
     st.divider()

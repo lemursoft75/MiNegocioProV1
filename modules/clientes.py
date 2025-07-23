@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from utils.db import guardar_cliente, leer_clientes
 
+
 def render():
     st.title("👥 Gestión de Clientes")
 

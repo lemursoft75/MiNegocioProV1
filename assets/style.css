@@ -1,0 +1,358 @@
+/* assets/style.css */
+
+/* Importar la fuente 'Nunito' de Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;700&display=swap');
+
+
+/* General body style for neumorphism background */
+body {
+  background-color: #e0e5ec;
+  font-family: 'Nunito', sans-serif;
+  margin: 0; /* Eliminar margen por defecto del body */
+  padding: 0; /* Eliminar padding por defecto del body */
+}
+
+/* Base style for Streamlit buttons */
+.stButton > button {
+  background-color: #e0e5ec;
+  border-radius: 12px;
+  box-shadow: 6px 6px 10px #b8b9be, -6px -6px 10px #ffffff;
+  border: none;
+  color: #333;
+  padding: 0.5rem 1rem;
+  transition: all 0.2s ease-in-out; /* Smooth transitions for hover/active states */
+  cursor: pointer; /* Indicate it's clickable */
+  font-weight: bold; /* Hacer el texto del botón más prominente */
+}
+
+/* Button hover effect (slight lift) */
+.stButton > button:hover {
+  box-shadow: 8px 8px 12px #b8b9be, -8px -8px 12px #ffffff;
+}
+
+/* Button active/pressed effect (sunk in) */
+.stButton > button:active {
+  box-shadow: inset 3px 3px 6px #b8b9be, inset -3px -3px 6px #ffffff;
+  transform: translateY(2px); /* Slight shift to simulate click */
+}
+
+/* Styles for text inputs, number inputs, and selectboxes */
+/* Estos selectores son más específicos para Streamlit */
+.stTextInput > div > div > input,
+.stNumberInput > div > div > input,
+.stDateInput > div > div > input, /* Campo de texto del date input */
+.stMultiSelect > div > div, /* Contenedor del multiselect */
+.stSlider > div > div > div[data-testid="stTickBarMinMax"], /* Elemento visual del slider */
+.stSelectbox > div[data-baseweb="select"] > div[role="button"] { /* El botón de un selectbox */
+  background-color: #e0e5ec;
+  border-radius: 12px;
+  box-shadow: inset 2px 2px 5px #b8b9be, inset -3px -3px 7px #ffffff; /* Inset shadow for sunk effect */
+  border: none;
+  color: #333;
+  padding: 0.5rem 1rem; /* Padding interno */
+  transition: all 0.2s ease-in-out;
+  font-size: 0.95rem; /* Ajuste de tamaño de fuente para campos de texto */
+  width: 100%; /* Asegura que tomen el ancho completo de su contenedor */
+}
+
+/* Specific styles for Text Area (st.text_area) */
+.stTextArea > div > div > textarea {
+  background-color: #e0e5ec;
+  border-radius: 12px;
+  box-shadow: inset 2px 2px 5px #b8b9be, inset -3px -3px 7px #ffffff;
+  border: none;
+  color: #333;
+  padding: 0.5rem 1rem;
+  transition: all 0.2s ease-in-out;
+  font-size: 0.95rem; /* Ajuste de tamaño de fuente */
+  width: 100%; /* Asegura que tomen el ancho completo */
+  min-height: 80px; /* Establece una altura mínima para textareas */
+  resize: vertical; /* Permite redimensionar verticalmente */
+}
+
+
+/* For the options within a selectbox when it drops down */
+.stSelectbox [data-baseweb="popover"] div[role="listbox"] div[data-baseweb="menu"] ul li {
+    font-size: 0.95rem; /* Adjust font size for selectbox options */
+    color: #333; /* Ensure text color is consistent */
+    background-color: #e0e5ec; /* Match background for options */
+}
+/* Hover effect for selectbox options */
+.stSelectbox [data-baseweb="popover"] div[role="listbox"] div[data-baseweb="menu"] ul li:hover {
+    background-color: #d1d9e6; /* Slightly darker on hover */
+}
+
+
+/* Focus effect for inputs */
+.stTextInput > div > div > input:focus,
+.stNumberInput > div > div > input:focus,
+.stDateInput > div > div > input:focus,
+.stTextArea > div > div > textarea:focus,
+.stMultiSelect > div > div:focus-within,
+.stSelectbox > div > div:focus-within { /* Para el contenedor del selectbox */
+  outline: none; /* Remove default outline */
+  box-shadow: inset 2px 2px 5px #b8b9be, inset -3px -3px 7px #ffffff,
+              0 0 0 3px rgba(179, 185, 190, 0.5); /* Subtle focus ring */
+}
+
+/* Styles for general containers and info/warning boxes (raised effect) */
+.stAlert,
+.stInfo,
+.stWarning,
+.stSuccess,
+.stError { /* Incluir stError aquí */
+    background-color: #e0e5ec;
+    border-radius: 12px;
+    box-shadow: 3px 3px 6px #b8b9be, -3px -3px 6px #ffffff; /* Raised effect */
+    padding: 1rem;
+    margin-bottom: 1rem;
+    color: #333; /* Default text color */
+}
+
+/* Specific text colors for alerts for better visibility */
+.stAlert > div > div > div { color: #555; } /* Neutral alert */
+.stInfo > div > div > div { color: #2196F3; } /* Blue for info */
+.stWarning > div > div > div { color: #FFC107; } /* Orange for warning */
+.stSuccess > div > div > div { color: #4CAF50; } /* Green for success */
+.stError > div > div > div { color: #F44336; } /* Red for error */
+
+
+/* Style for Streamlit sidebar */
+section[data-testid="stSidebar"] {
+    background-color: #e0e5ec;
+    box-shadow: 6px 6px 10px #b8b9be, -6px -6px 10px #ffffff; /* Soft raised effect for the sidebar container */
+    padding: 1rem; /* Adjust padding if needed */
+}
+
+/* Style for option_menu items in sidebar (from streamlit_option_menu) */
+/* This targets the entire menu container (the box that holds the options) */
+.streamlit-option-menu {
+    background-color: #e0e5ec;
+    border-radius: 12px;
+    box-shadow: inset 3px 3px 7px #b8b9be, inset -3px -3px 7px #ffffff; /* Sunk effect for the menu background */
+    padding: 0.5rem;
+    margin-top: 1rem; /* Add some space from the top of the sidebar */
+}
+
+/* Individual buttons within the option menu */
+.streamlit-option-menu button {
+    background-color: #e0e5ec;
+    border-radius: 8px;
+    box-shadow: 3px 3px 6px #b8b9be, -3px -3px 6px #ffffff; /* Raised effect for non-selected items */
+    color: #333;
+    margin: 0.2rem 0; /* Space between items */
+    transition: all 0.2s ease-in-out;
+    padding: 0.5rem 1rem; /* Add some padding to the buttons */
+    width: 100%; /* Make buttons take full width */
+    text-align: left; /* Align text to the left */
+}
+
+/* Hover effect for non-selected items in the option menu */
+.streamlit-option-menu button:hover:not(.selected) {
+    box-shadow: 5px 5px 8px #b8b9be, -5px -5px 8px #ffffff;
+}
+
+/* Style for the selected item in the option menu */
+.streamlit-option-menu button.selected {
+    background-color: #e0e5ec; /* Keep background color */
+    box-shadow: inset 3px 3px 6px #b8b9be, inset -3px -3px 6px #ffffff; /* Sunk effect for selected item */
+    color: #007bff; /* Highlight color for selected item (e.g., a blue) */
+    font-weight: bold;
+}
+
+/* Ensure icons in option_menu are colored correctly */
+.streamlit-option-menu button svg {
+    color: #333; /* Default icon color */
+    transition: all 0.2s ease-in-out;
+}
+.streamlit-option-menu button.selected svg {
+    color: #007bff; /* Highlight color for selected icon */
+}
+
+/* Style for headers (subtle neumorphic text) */
+h1, h2, h3, h4, h5, h6 {
+    color: #333;
+    text-shadow: 1px 1px 2px rgba(255,255,255,0.7), -1px -1px 2px rgba(0,0,0,0.2);
+    margin-top: 1.5rem;
+    margin-bottom: 1rem;
+}
+
+/* Specific font sizes for your titles */
+h2 {
+    font-size: 5.5rem; /* Aumenta el tamaño para "MiNegocio Pro" */
+}
+
+h3 {
+    font-size: 1.8rem; /* Aumenta el tamaño para "Panel financiero en tiempo real" */
+}
+
+/* Improve DataFrame appearance (sunk effect) */
+.stDataFrame {
+    background-color: #e0e5ec;
+    border-radius: 12px;
+    box-shadow: inset 2px 2px 5px #b8b9be, inset -3px -3px 7px #ffffff;
+    padding: 1rem;
+    overflow-x: auto; /* Ensure horizontal scrolling for wide tables */
+    margin-bottom: 1rem;
+}
+
+/* Global app container background to match body */
+[data-testid="stAppViewContainer"] {
+    background-color: #e0e5ec;
+}
+
+/* Adjustments for expanders if you use them */
+.streamlit-expanderHeader {
+    background-color: #e0e5ec;
+    border-radius: 12px;
+    box-shadow: 3px 3px 6px #b8b9be, -3px -3px 6px #ffffff;
+    padding: 0.5rem 1rem;
+    color: #333;
+    transition: all 0.2s ease-in-out;
+    cursor: pointer;
+    font-weight: bold;
+}
+.streamlit-expanderHeader:hover {
+    box-shadow: 5px 5px 8px #b8b9be, -5px -5px 8px #ffffff;
+}
+.streamlit-expanderHeader.streamlit-expanderHeader-collapsed {
+    /* Estilo para el encabezado cuando está colapsado, puedes ajustar la sombra si quieres */
+}
+
+
+/* For radio buttons and checkboxes (subtle raised effect for label) */
+.stRadio > label,
+.stCheckbox > label {
+    background-color: #e0e5ec;
+    border-radius: 8px;
+    box-shadow: 2px 2px 4px #b8b9be, -2px -2px 4px #ffffff;
+    padding: 0.3rem 0.8rem;
+    margin-bottom: 0.5rem;
+    display: inline-flex; /* Use flexbox to align content (radio/checkbox icon and text) */
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+}
+.stRadio > label:hover,
+.stCheckbox > label:hover {
+    box-shadow: 3px 3px 6px #b8b9be, -3px -3px 6px #ffffff;
+}
+
+/* For the actual radio/checkbox input element */
+.stRadio input[type="radio"],
+.stCheckbox input[type="checkbox"] {
+    margin-right: 0.5rem; /* Space between the input and the label text */
+    /* You might want to style the actual radio/checkbox circle/square here if default is not neumorphic */
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    width: 1.2em;
+    height: 1.2em;
+    border-radius: 50%; /* For radio */
+    border: none;
+    background-color: #e0e5ec;
+    box-shadow: inset 2px 2px 4px #b8b9be, inset -2px -2px 4px #ffffff;
+    transition: background-color 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+}
+
+/* Checked state for radio/checkbox */
+.stRadio input[type="radio"]:checked,
+.stCheckbox input[type="checkbox"]:checked {
+    background-color: #6c757d; /* A slightly darker "pressed" color when checked */
+    box-shadow: inset 2px 2px 4px #6c757d, inset -2px -2px 4px #8d97a0;
+}
+
+/* For checkboxes, adjust border-radius to be square */
+.stCheckbox input[type="checkbox"] {
+    border-radius: 4px; /* Square for checkbox */
+}
+
+
+/* Ensure the logo image renders properly within neumorphic design if it's placed in a container */
+.stImage > img {
+    border-radius: 10px; /* Soften edges of images */
+    box-shadow: 3px 3px 6px #b8b9be, -3px -3px 6px #ffffff;
+}
+
+/* For st.metric (if used) */
+[data-testid="stMetric"] {
+    background-color: #e0e5ec;
+    border-radius: 12px;
+    box-shadow: 3px 3px 6px #b8b9be, -3px -3px 6px #ffffff;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    text-align: center;
+}
+[data-testid="stMetricLabel"] {
+    color: #555;
+    font-size: 0.9em;
+    margin-bottom: 0.5rem;
+}
+[data-testid="stMetricValue"] {
+    color: #333;
+    font-size: 2em;
+    font-weight: bold;
+}
+[data-testid="stMetricDelta"] {
+    color: #4CAF50; /* Green for positive */
+    font-size: 0.8em;
+}
+[data-testid="stMetricDelta"] svg {
+    vertical-align: middle;
+}
+
+/* Estilo para las barras de progreso */
+.stProgress > div > div > div > div {
+    background-color: #6c757d; /* Color de la barra de progreso */
+    border-radius: 10px;
+    box-shadow: inset 2px 2px 5px #b8b9be, inset -3px -3px 7px #ffffff;
+}
+.stProgress > div > div {
+    background-color: #e0e5ec; /* Fondo de la barra de progreso */
+    border-radius: 10px;
+    box-shadow: 3px 3px 6px #b8b9be, -3px -3px 6px #ffffff;
+}
+
+
+/* --- General Streamlit container adjustments to ensure neumorphic background --- */
+/* The main app container */
+[data-testid="stAppViewContainer"] {
+    background-color: #e0e5ec;
+}
+
+/* The block container for content */
+[data-testid="stBlock"] {
+    background-color: #e0e5ec;
+}
+
+/* Elementos de columna */
+[data-testid="stVerticalBlock"] {
+    background-color: #e0e5ec;
+}
+[data-testid="stHorizontalBlock"] {
+    background-color: #e0e5ec;
+}
+
+
+/* Adjust the content width to ensure no weird gaps appear */
+.main .block-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+    padding-left: 2rem;
+    padding-right: 2rem;
+}
+
+/* Add this new section or modify an existing one if similar */
+/* Style for Streamlit header (where "Deploy" and "Menu" usually are) */
+[data-testid="stHeader"] {
+    background-color: #e0e5ec; /* Match your neumorphic background */
+    /* You might want to add a subtle shadow here too for consistency */
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05); /* Optional: A very subtle shadow */
+}
+
+/* If you want to change the top-most bar (the theme-colored one) */
+[data-testid="stDecoration"] {
+    background-image: none; /* Remove any gradient */
+    background-color: #e0e5ec; /* Set to your neumorphic background */
+}

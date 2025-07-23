@@ -2,249 +2,343 @@
 
 import streamlit as st
 import pandas as pd
-from utils.db import leer_ventas, guardar_transaccion, leer_transacciones, leer_clientes  # Importar leer_clientes
+from utils.db import leer_ventas, guardar_transaccion, leer_transacciones, leer_clientes
+
+
+
+
+# Función de callback para el selectbox de cliente
+def on_cliente_change():
+    """Esta función se llama cuando el cliente en el selectbox cambia."""
+    # Al cambiar de cliente, aseguramos que las opciones de manejo de excedentes/anticipos se oculten.
+    if "mostrar_opciones_excedente" in st.session_state:
+        del st.session_state["mostrar_opciones_excedente"]
+    if "pago_excedente_info" in st.session_state:
+        del st.session_state["pago_excedente_info"]
+    if "mostrar_opciones_anticipo" in st.session_state:
+        del st.session_state["mostrar_opciones_anticipo"]
+    if "pago_anticipo_info" in st.session_state:
+        del st.session_state["pago_anticipo_info"]
+    st.rerun()
 
 
 def render():
     st.title("💰 Módulo de cobranza")
 
-    # Asegurarse de que los DataFrames estén en st.session_state y sean numéricos
-    # Refresh transacciones_data and ventas_data on every rerun to ensure latest balances
+    # Cargar datos frescos en cada render para asegurar la actualización
     st.session_state.ventas_data = leer_ventas()
     st.session_state.transacciones_data = leer_transacciones()
-    st.session_state.clientes = leer_clientes()  # Asegurar que clientes también se cargue
+    st.session_state.clientes = leer_clientes()
 
-    ventas = st.session_state.ventas_data
-    transacciones = st.session_state.transacciones_data
-    clientes = st.session_state.clientes  # Obtener la referencia a clientes
+    ventas_df = st.session_state.ventas_data
+    transacciones_df = st.session_state.transacciones_data
+    clientes_df = st.session_state.clientes
 
-    # Validar columnas necesarias, incluyendo el nuevo "Monto Crédito"
-    columnas_necesarias_ventas = ["Cliente", "Tipo de venta", "Monto Crédito"]
-    # Asegurarse de que las columnas existan y sean numéricas, si no, inicializarlas
-    for col in ["Monto Crédito", "Monto Contado", "Anticipo Aplicado"]:  # Asegurar que estas también sean numéricas
-        if col not in ventas.columns:
-            ventas[col] = 0.0
-        ventas[col] = pd.to_numeric(ventas[col], errors='coerce').fillna(0.0)
+    # --- Preprocesamiento y cálculo de saldos ---
 
-    if all(col in ventas.columns for col in columnas_necesarias_ventas):
-        st.write("📦 Resumen de ventas (Crédito y Mixtas):", ventas[ventas["Tipo de venta"].isin(["Crédito", "Mixta"])][
-            ["Cliente", "Tipo de venta", "Monto Crédito"]].head())
+    # Asegurar que las columnas numéricas sean float y manejar NaNs
+    numeric_cols_ventas = ["Monto Crédito", "Monto Contado", "Anticipo Aplicado", "Total"]
+    for col in numeric_cols_ventas:
+        if col not in ventas_df.columns:
+            ventas_df[col] = 0.0
+        ventas_df[col] = pd.to_numeric(ventas_df[col], errors='coerce').fillna(0.0)
+
+    numeric_cols_transacciones = ["Monto"]
+    for col in numeric_cols_transacciones:
+        if col not in transacciones_df.columns:
+            transacciones_df[col] = 0.0
+        transacciones_df[col] = pd.to_numeric(transacciones_df[col], errors='coerce').fillna(0.0)
+
+    # 1. Calcular el total de crédito otorgado por cliente
+    # Asegurarse de que 'Tipo de venta' sea string para la comparación
+    ventas_df["Tipo de venta"] = ventas_df["Tipo de venta"].astype(str)
+    credito_otorgado = ventas_df[
+        ventas_df["Tipo de venta"].isin(["Crédito", "Mixta"])
+    ].groupby("Cliente")["Monto Crédito"].sum().reset_index()
+    credito_otorgado.rename(columns={"Monto Crédito": "Crédito Otorgado"}, inplace=True)
+
+    # 2. Calcular el total de pagos de cobranza (efectivos) por cliente
+    pagos_cobranza = transacciones_df[
+        transacciones_df["Categoría"].astype(str) == "Cobranza"
+        ].groupby("Cliente")["Monto"].sum().reset_index()
+    pagos_cobranza.rename(columns={"Monto": "Pagos Cobranza"}, inplace=True)
+
+    # 3. Calcular el total de anticipos APLICADOS a deudas por cliente
+    anticipos_aplicados = transacciones_df[
+        transacciones_df["Categoría"].astype(str) == "Anticipo Aplicado"
+        ].groupby("Cliente")["Monto"].sum().reset_index()
+    anticipos_aplicados.rename(columns={"Monto": "Anticipos Aplicados"}, inplace=True)
+
+    # 4. Calcular el total de anticipos DISPONIBLES (saldo a favor del cliente)
+    # Esto es: Anticipos Cliente - Anticipos Aplicados
+    anticipos_cliente_recibidos = transacciones_df[
+        transacciones_df["Categoría"].astype(str) == "Anticipo Cliente"
+        ].groupby("Cliente")["Monto"].sum().reset_index()
+    anticipos_cliente_recibidos.rename(columns={"Monto": "Anticipos Recibidos"}, inplace=True)
+
+    saldo_anticipos = anticipos_cliente_recibidos.merge(anticipos_aplicados, on="Cliente", how="left").fillna(0)
+    saldo_anticipos["Saldo Anticipos"] = saldo_anticipos["Anticipos Recibidos"] - saldo_anticipos["Anticipos Aplicados"]
+    # Nos interesan solo los anticipos disponibles (positivos)
+    saldo_anticipos = saldo_anticipos[saldo_anticipos["Saldo Anticipos"] > 0]
+
+    # Unir todos los datos para calcular el saldo final
+    saldos_intermedio = pd.merge(credito_otorgado, pagos_cobranza, on="Cliente", how="left").fillna(0)
+    saldos_final = pd.merge(saldos_intermedio, anticipos_aplicados, on="Cliente", how="left").fillna(0)
+
+    saldos_final["Total Pagos y Aplicaciones"] = saldos_final["Pagos Cobranza"] + saldos_final["Anticipos Aplicados"]
+    saldos_final["Saldo Pendiente"] = saldos_final["Crédito Otorgado"] - saldos_final["Total Pagos y Aplicaciones"]
+
+    # Añadir clientes que solo tienen anticipos (sin deuda actual)
+    # Identificar clientes que tienen anticipos pero no aparecen en saldos_final (no tienen deuda)
+    clientes_solo_anticipos = saldo_anticipos[~saldo_anticipos['Cliente'].isin(saldos_final['Cliente'])]
+
+    if not clientes_solo_anticipos.empty:
+        # Crear un DataFrame con la estructura de saldos_final para estos clientes
+        df_solo_anticipos = pd.DataFrame({
+            "Cliente": clientes_solo_anticipos["Cliente"],
+            "Crédito Otorgado": 0.0,
+            "Pagos Cobranza": 0.0,
+            "Anticipos Aplicados": 0.0,
+            "Total Pagos y Aplicaciones": 0.0,
+            "Saldo Pendiente": 0.0  # Su saldo pendiente es 0, su "saldo" es el anticipo a favor
+        })
+        saldos_final = pd.concat([saldos_final, df_solo_anticipos], ignore_index=True)
+
+    # Merge final para mostrar el saldo de anticipos junto con el saldo pendiente de deuda
+    saldos_completos = pd.merge(saldos_final, saldo_anticipos[['Cliente', 'Saldo Anticipos']], on="Cliente",
+                                how="left").fillna(0)
+
+    # Asegurarse de que el "Saldo Pendiente" no sea negativo (si es 0 o negativo, significa que se cubrió la deuda)
+    saldos_completos["Saldo Pendiente Display"] = saldos_completos["Saldo Pendiente"].apply(lambda x: max(0, x))
+
+    # --- Fin preprocesamiento y cálculo de saldos ---
+
+    st.subheader("📋 Saldos por cliente")
+
+    cliente_opciones = clientes_df["Nombre"].tolist() if not clientes_df.empty else []
+
+    if not cliente_opciones:
+        st.info("No hay clientes registrados. Por favor, agregue clientes en el módulo 'Clientes'.")
+        st.stop()
+
+    if "cobranza_cliente_select" not in st.session_state and cliente_opciones:
+        st.session_state.cobranza_cliente_select = cliente_opciones[0]
+
+    cliente_seleccionado_para_ui = st.session_state.cobranza_cliente_select
+
+    # Mostrar la tabla de saldos general o filtrada
+    if cliente_seleccionado_para_ui and saldos_completos["Cliente"].isin([cliente_seleccionado_para_ui]).any():
+        saldos_filtrados_ui = saldos_completos[saldos_completos["Cliente"] == cliente_seleccionado_para_ui].copy()
+
+        # Ajustar el "Saldo pendiente" a cero si el "Total Pagos y Aplicaciones" cubre o excede el "Crédito Otorgado"
+        saldos_filtrados_ui["Saldo Pendiente Display"] = saldos_filtrados_ui.apply(
+            lambda row: 0.0 if row["Total Pagos y Aplicaciones"] >= row["Crédito Otorgado"] else row["Saldo Pendiente"],
+            axis=1
+        )
+
+        st.dataframe(
+            saldos_filtrados_ui[["Cliente", "Crédito Otorgado", "Total Pagos y Aplicaciones", "Saldo Pendiente Display",
+                                 "Saldo Anticipos"]].rename(columns={
+                "Crédito Otorgado": "Crédito Otorgado",
+                "Total Pagos y Aplicaciones": "Pagos y Aplicaciones",
+                "Saldo Pendiente Display": "Saldo Pendiente",
+                "Saldo Anticipos": "Anticipo a Favor"  # Nuevo nombre más claro
+            }),
+            use_container_width=True
+        )
     else:
-        st.warning(
-            "⚠️ Las ventas no contienen las columnas necesarias para calcular saldos de crédito. Verifica tu función `leer_ventas`.")
+        # Mostrar la tabla completa con el Saldo Pendiente ajustado
+        saldos_display = saldos_completos.copy()
+        saldos_display["Saldo Pendiente Display"] = saldos_display.apply(
+            lambda row: 0.0 if row["Total Pagos y Aplicaciones"] >= row["Crédito Otorgado"] else row["Saldo Pendiente"],
+            axis=1
+        )
 
-    # ⚙️ Filtrar ventas a crédito o mixtas (solo la porción a crédito)
-    ventas["Tipo de venta"] = ventas["Tipo de venta"].astype(str)
-    creditos_reales = ventas[
-        ventas["Tipo de venta"].isin(["Crédito", "Mixta"])].copy()
-
-    if creditos_reales.empty:
-        st.info("No hay ventas a crédito o mixtas registradas.")
-        deuda_total = pd.DataFrame(columns=["Cliente", "Monto Crédito"])
-    else:
-        deuda_total = creditos_reales.groupby("Cliente")["Monto Crédito"].sum().reset_index()
-
-    pagos_cobranza = transacciones[
-        transacciones["Categoría"].astype(str) == "Cobranza"
-        ] if not transacciones.empty else pd.DataFrame(columns=["Cliente", "Monto", "Categoría"])
-
-    # También necesitamos considerar los anticipos aplicados como "pago" a la deuda para el cálculo del saldo
-    anticipos_aplicados_a_cobranza = transacciones[
-        transacciones["Categoría"].astype(str) == "Anticipo Aplicado"
-        ] if not transacciones.empty else pd.DataFrame(columns=["Cliente", "Monto", "Categoría"])
-
-    if not pagos_cobranza.empty and "Cliente" in pagos_cobranza.columns:
-        pagos_cobranza["Monto"] = pd.to_numeric(pagos_cobranza["Monto"], errors='coerce').fillna(0.0)
-        pagos_cobranza_sum = pagos_cobranza.groupby("Cliente")["Monto"].sum().reset_index()
-    else:
-        pagos_cobranza_sum = pd.DataFrame(columns=["Cliente", "Monto"])
-
-    if not anticipos_aplicados_a_cobranza.empty and "Cliente" in anticipos_aplicados_a_cobranza.columns:
-        anticipos_aplicados_a_cobranza["Monto"] = pd.to_numeric(anticipos_aplicados_a_cobranza["Monto"],
-                                                                errors='coerce').fillna(0.0)
-        # Los anticipos aplicados son 'Gasto' en la tabla de transacciones pero 'suman' a los pagos recibidos aquí.
-        pagos_anticipos_sum = anticipos_aplicados_a_cobranza.groupby("Cliente")["Monto"].sum().reset_index()
-    else:
-        pagos_anticipos_sum = pd.DataFrame(columns=["Cliente", "Monto"])
-
-    # Unir pagos de cobranza y anticipos aplicados para el total de "pagos realizados"
-    # Usamos outer merge para no perder clientes que solo tienen un tipo de pago
-    total_pagos_realizados = pagos_cobranza_sum.merge(pagos_anticipos_sum, on="Cliente", how="outer",
-                                                      suffixes=('_cobranza', '_anticipo')).fillna(0)
-    total_pagos_realizados['Total Pagos Realizados'] = total_pagos_realizados['Monto_cobranza'] + \
-                                                       total_pagos_realizados['Monto_anticipo']
-    pagos_total = total_pagos_realizados[['Cliente', 'Total Pagos Realizados']].rename(
-        columns={'Total Pagos Realizados': 'Monto'})
-
-    saldos = deuda_total.merge(pagos_total, on="Cliente", how="left").fillna(0)
-    saldos["Monto Crédito"] = pd.to_numeric(saldos["Monto Crédito"], errors='coerce').fillna(0.0)
-    saldos["Monto"] = pd.to_numeric(saldos["Monto"], errors='coerce').fillna(0.0)
-    saldos["Saldo pendiente"] = saldos["Monto Crédito"] - saldos["Monto"]
-
-    st.subheader("📋 Saldos pendientes por cliente")
-    st.dataframe(
-        saldos[["Cliente", "Monto Crédito", "Monto", "Saldo pendiente"]].rename(columns={
-            "Monto Crédito": "Crédito otorgado",
-            "Monto": "Pagos realizados"
-        }),
-        use_container_width=True
-    )
+        st.dataframe(
+            saldos_display[["Cliente", "Crédito Otorgado", "Total Pagos y Aplicaciones", "Saldo Pendiente Display",
+                            "Saldo Anticipos"]].rename(columns={
+                "Crédito Otorgado": "Crédito Otorgado",
+                "Total Pagos y Aplicaciones": "Pagos y Aplicaciones",
+                "Saldo Pendiente Display": "Saldo Pendiente",
+                "Saldo Anticipos": "Anticipo a Favor"
+            }),
+            use_container_width=True
+        )
+        if cliente_opciones:
+            st.info("Selecciona un cliente para ver su saldo detallado, o ve la tabla completa arriba.")
+        else:
+            st.info("No hay saldos pendientes para mostrar.")
 
     st.divider()
     st.subheader("🧾 Registrar nuevo pago")
-    # Usar clientes de st.session_state
-    cliente_opciones = clientes["Nombre"].tolist() if not clientes.empty else []
 
-    if not cliente_opciones:
-        st.info("No hay clientes registrados.")
-        st.stop()  # Detener la ejecución si no hay clientes para seleccionar
+    cliente_seleccionado = st.selectbox(
+        "Cliente",
+        cliente_opciones,
+        index=cliente_opciones.index(
+            st.session_state.cobranza_cliente_select) if st.session_state.cobranza_cliente_select in cliente_opciones else 0,
+        key="cobranza_cliente_select_form",  # Cambiado la key para evitar conflicto
+        on_change=on_cliente_change
+    )
 
-    cliente_seleccionado = st.selectbox("Cliente", cliente_opciones, key="cobranza_cliente_select")
+    # Recalcular saldo_cliente_actual de forma precisa
+    saldo_cliente_actual_para_pago = 0.0
+    anticipo_a_favor_actual = 0.0
 
-    # Si el cliente seleccionado tiene saldo pendiente, sugerir ese monto
-    monto_sugerido = 0.0
-    if cliente_seleccionado and not saldos.empty and cliente_seleccionado in saldos["Cliente"].tolist():
-        saldo_info = saldos[saldos["Cliente"] == cliente_seleccionado]
-        if not saldo_info.empty:
-            monto_sugerido = saldo_info["Saldo pendiente"].values[0]
-            if monto_sugerido < 0:  # Si el saldo es negativo (ya hay excedente/anticipo), no sugerir ese monto para pago de deuda
-                monto_sugerido = 0.0
+    if cliente_seleccionado and not saldos_completos.empty and cliente_seleccionado in saldos_completos[
+        "Cliente"].tolist():
+        cliente_data = saldos_completos[saldos_completos["Cliente"] == cliente_seleccionado].iloc[0]
+        saldo_cliente_actual_para_pago = max(0,
+                                             cliente_data["Saldo Pendiente"])  # Siempre positivo o cero para la deuda
+        anticipo_a_favor_actual = cliente_data["Saldo Anticipos"]
 
-    monto = st.number_input("Monto a abonar", min_value=0.0, value=float(monto_sugerido), format="%.2f",
-                            key="cobranza_monto_input")
+    monto_sugerido_input = float(saldo_cliente_actual_para_pago)
+    if monto_sugerido_input == 0 and anticipo_a_favor_actual > 0:
+        st.info(f"El cliente {cliente_seleccionado} tiene un anticipo a favor de ${anticipo_a_favor_actual:,.2f}.")
+
+    monto = st.number_input(
+        "Monto a abonar",
+        min_value=0.0,
+        value=monto_sugerido_input,
+        format="%.2f",
+        key="cobranza_monto_input"
+    )
+
     metodo_pago = st.selectbox("Método de pago", ["Efectivo", "Transferencia", "Tarjeta"], key="cobranza_metodo_pago")
     fecha = st.date_input("Fecha de pago", key="cobranza_fecha")
     descripcion = st.text_input("Referencia del pago (opcional)", key="cobranza_descripcion")
 
-    if st.button("Procesar Pago",
-                 key="cobranza_procesar_pago_btn_main"):  # Añadir key aquí para evitar duplicidad si el botón está fuera de un form
-        # Asegurarse de tener el saldo más reciente
+    if st.button("Procesar Pago", key="cobranza_procesar_pago_btn_main"):
+        # Vuelve a cargar datos frescos justo antes de procesar
         st.session_state.transacciones_data = leer_transacciones()
-        transacciones = st.session_state.transacciones_data
-
-        # Recalcular saldos para el cliente específico justo antes de procesar
-        # Esto es importante si se hicieron cambios desde la última renderización completa
-        saldo_cliente = 0.0
-        if cliente_seleccionado:
-            # Recalcular anticipos para este cliente
-            anticipos_cliente_total_actual = transacciones[
-                (transacciones["Categoría"] == "Anticipo Cliente") &
-                (transacciones["Cliente"] == cliente_seleccionado) &
-                (transacciones["Tipo"] == "Ingreso")
-                ]["Monto"].sum()
-            anticipos_aplicados_total_actual = transacciones[
-                (transacciones["Categoría"] == "Anticipo Aplicado") &
-                (transacciones["Cliente"] == cliente_seleccionado) &
-                (transacciones["Tipo"] == "Gasto")
-                ]["Monto"].sum()
-            saldo_anticipos_actual = float(anticipos_cliente_total_actual) - float(anticipos_aplicados_total_actual)
-
-            # Recalcular deuda para este cliente (copia de la lógica de arriba)
-            creditos_otorgados_actual = ventas[
-                (ventas["Tipo de venta"].isin(["Crédito", "Mixta"])) &
-                (ventas["Cliente"] == cliente_seleccionado)
-                ]["Monto Crédito"].sum()
-
-            pagos_cobranza_actual = transacciones[
-                (transacciones["Categoría"].astype(str) == "Cobranza") &
-                (transacciones["Cliente"] == cliente_seleccionado)
-                ]["Monto"].sum()
-
-            anticipos_aplicados_a_cobranza_actual = transacciones[
-                (transacciones["Categoría"].astype(str) == "Anticipo Aplicado") &
-                (transacciones["Cliente"] == cliente_seleccionado)
-                ]["Monto"].sum()
-
-            total_pagos_actual = float(pagos_cobranza_actual) + float(anticipos_aplicados_a_cobranza_actual)
-
-            saldo_cliente = float(creditos_otorgados_actual) - total_pagos_actual
+        st.session_state.ventas_data = leer_ventas()
 
         monto_f = float(monto)
 
         if monto_f <= 0:
             st.error("❌ El monto a abonar debe ser mayor que cero.")
-        elif monto_f > saldo_cliente and saldo_cliente > 0:
-            # Caso 1: Abono excede el saldo pendiente (y hay saldo pendiente)
-            st.warning(
-                f"⚠️ El abono de ${monto_f:.2f} excede el saldo pendiente de ${saldo_cliente:.2f} para {cliente_seleccionado}.")
-            excedente = monto_f - saldo_cliente
+            st.stop()  # Detener la ejecución si el monto es inválido
 
-            st.session_state["pago_excedente_info"] = {
-                "cliente": cliente_seleccionado,
-                "monto_original": monto_f,
-                "saldo_cliente": saldo_cliente,
-                "excedente": excedente,
-                "metodo_pago": metodo_pago,
-                "fecha": fecha,
-                "descripcion": descripcion
-            }
-            st.session_state["mostrar_opciones_excedente"] = True
-            st.rerun()
+        # Recalcular el saldo pendiente y anticipo a favor para el cliente seleccionado
+        # Usamos los DataFrames actualizados de session_state
+        current_ventas_df = st.session_state.ventas_data
+        current_transacciones_df = st.session_state.transacciones_data
 
-        elif monto_f > 0 and saldo_cliente <= 0:
-            # Caso 2: Cliente no tiene saldo pendiente, pero se está abonando un monto
-            # Aquí, el monto completo es un anticipo o un excedente sobre un anticipo ya existente.
+        credito_otorgado_current = current_ventas_df[
+            (current_ventas_df["Tipo de venta"].isin(["Crédito", "Mixta"])) &
+            (current_ventas_df["Cliente"] == cliente_seleccionado)
+            ]["Monto Crédito"].sum()
+
+        pagos_cobranza_current = current_transacciones_df[
+            (current_transacciones_df["Categoría"].astype(str) == "Cobranza") &
+            (current_transacciones_df["Cliente"] == cliente_seleccionado)
+            ]["Monto"].sum()
+
+        anticipos_aplicados_current = current_transacciones_df[
+            (current_transacciones_df["Categoría"].astype(str) == "Anticipo Aplicado") &
+            (current_transacciones_df["Cliente"] == cliente_seleccionado)
+            ]["Monto"].sum()
+
+        anticipos_recibidos_current = current_transacciones_df[
+            (current_transacciones_df["Categoría"].astype(str) == "Anticipo Cliente") &
+            (current_transacciones_df["Cliente"] == cliente_seleccionado)
+            ]["Monto"].sum()
+
+        total_pagos_aplicaciones_current = pagos_cobranza_current + anticipos_aplicados_current
+        saldo_pendiente_current = credito_otorgado_current - total_pagos_aplicaciones_current
+        saldo_anticipo_a_favor_current = anticipos_recibidos_current - anticipos_aplicados_current
+
+        # --- Lógica de procesamiento de pago ---
+
+        # Caso 1: Tiene saldo pendiente (deuda)
+        if saldo_pendiente_current > 0:
+            # Si el pago cubre toda o parte de la deuda
+            if monto_f <= saldo_pendiente_current:
+                pago_dict = {
+                    "Fecha": fecha.isoformat(),
+                    "Descripción": descripcion or f"Abono de crédito por parte de {cliente_seleccionado}",
+                    "Categoría": "Cobranza",
+                    "Tipo": "Ingreso",
+                    "Monto": monto_f,
+                    "Cliente": cliente_seleccionado,
+                    "Método de pago": metodo_pago
+                }
+                guardar_transaccion(pago_dict)
+                st.success(
+                    f"✅ Pago de ${monto_f:.2f} registrado para {cliente_seleccionado}. Saldo restante: ${max(0, saldo_pendiente_current - monto_f):,.2f}")
+            # Si el pago excede la deuda
+            else:
+                excedente = monto_f - saldo_pendiente_current
+                st.warning(
+                    f"⚠️ El abono de ${monto_f:.2f} excede el saldo pendiente de ${saldo_pendiente_current:.2f} para {cliente_seleccionado}. Excedente: ${excedente:.2f}")
+
+                st.session_state["pago_excedente_info"] = {
+                    "cliente": cliente_seleccionado,
+                    "monto_original": monto_f,
+                    "saldo_pendiente": saldo_pendiente_current,
+                    "excedente": excedente,
+                    "metodo_pago": metodo_pago,
+                    "fecha": fecha,
+                    "descripcion": descripcion
+                }
+                st.session_state["mostrar_opciones_excedente"] = True
+
+        # Caso 2: No tiene saldo pendiente (o ya es 0 o negativo por pagos previos)
+        elif saldo_pendiente_current <= 0:  # Si ya no hay deuda o es negativa (sobrepagado)
             st.warning(
-                f"⚠️ El cliente {cliente_seleccionado} no tiene saldo pendiente. ¿Desea registrarlo como anticipo?")
+                f"⚠️ El cliente {cliente_seleccionado} no tiene saldo pendiente. ¿Desea registrar ${monto_f:.2f} como anticipo?")
 
             st.session_state["pago_anticipo_info"] = {
                 "cliente": cliente_seleccionado,
-                "monto": monto_f,  # El monto completo es el anticipo
+                "monto": monto_f,
                 "metodo_pago": metodo_pago,
                 "fecha": fecha,
                 "descripcion": descripcion
             }
             st.session_state["mostrar_opciones_anticipo"] = True
-            st.rerun()
 
-        else:  # Si el monto es <= saldo_cliente (y > 0) - Pago normal de cobranza
-            pago_dict = {
-                "Fecha": fecha.isoformat(),
-                "Descripción": descripcion or f"Abono de crédito por parte de {cliente_seleccionado}",
-                "Categoría": "Cobranza",
-                "Tipo": "Ingreso",
-                "Monto": float(monto_f),
-                "Cliente": cliente_seleccionado,
-                "Método de pago": metodo_pago
-            }
-            guardar_transaccion(pago_dict)
-            st.success(f"✅ Pago de ${monto_f:.2f} registrado para {cliente_seleccionado}")
-            st.session_state.transacciones_data = leer_transacciones()
-            st.session_state.ventas_data = leer_ventas()
-            st.rerun()
+        # Una vez que la transacción inicial se procesa o se establecen las banderas
+        st.session_state.transacciones_data = leer_transacciones()  # Recargar datos después de guardar
+        st.session_state.ventas_data = leer_ventas()
+        st.rerun()
 
     # --- Bloque para mostrar opciones de excedente (solo si se necesita) ---
     if st.session_state.get("mostrar_opciones_excedente", False):
         info = st.session_state["pago_excedente_info"]
         with st.form("form_opciones_excedente"):
             st.write(
-                f"Para el cliente {info['cliente']}, abono ${info['monto_original']:.2f}, saldo ${info['saldo_cliente']:.2f}, excedente ${info['excedente']:.2f}.")
+                f"Para el cliente **{info['cliente']}**:")
+            st.write(f"- Monto ingresado: **${info['monto_original']:.2f}**")
+            st.write(f"- Saldo pendiente: **${info['saldo_pendiente']:.2f}**")
+            st.write(f"- Excedente: **${info['excedente']:.2f}**")
+
             opcion_excedente = st.radio(
                 "¿Qué deseas hacer con el excedente?",
-                ["Generar anticipo con el excedente", "Abonar solo el saldo pendiente", "Cancelar operación"],
-                key="radio_excedente_form"  # Added key
+                ["Generar anticipo con el excedente", "Abonar solo el saldo pendiente (el resto se ignora)",
+                 "Cancelar operación"],
+                key="radio_excedente_form"
             )
             col1, col2 = st.columns(2)
             with col1:
-                confirmar_excedente = st.form_submit_button("Confirmar Opción")  # REMOVED KEY
+                confirmar_excedente = st.form_submit_button("Confirmar Opción")
             with col2:
-                cancelar_opcion_excedente = st.form_submit_button("Cancelar")  # REMOVED KEY
+                cancelar_opcion_excedente = st.form_submit_button("Cancelar")
 
         if confirmar_excedente:
             if opcion_excedente == "Generar anticipo con el excedente":
-                # Guardar el pago de cobranza (saldo_cliente)
+                # Primero, registrar el pago que cubre el saldo pendiente
                 pago_cobranza_dict = {
                     "Fecha": info["fecha"].isoformat(),
-                    "Descripción": f"Abono de crédito para {info['cliente']}",
+                    "Descripción": f"Abono de crédito para {info['cliente']} (cubre deuda).",
                     "Categoría": "Cobranza",
                     "Tipo": "Ingreso",
-                    "Monto": float(info["saldo_cliente"]),
+                    "Monto": float(info["saldo_pendiente"]),  # Solo el monto de la deuda
                     "Cliente": info["cliente"],
                     "Método de pago": info["metodo_pago"]
                 }
                 guardar_transaccion(pago_cobranza_dict)
 
-                # Guardar el excedente como Anticipo Cliente
+                # Luego, registrar el excedente como un anticipo
                 anticipo_excedente_dict = {
                     "Fecha": info["fecha"].isoformat(),
                     "Descripción": info[
@@ -258,24 +352,26 @@ def render():
                 guardar_transaccion(anticipo_excedente_dict)
 
                 st.success(
-                    f"✅ Pago de ${info['saldo_cliente']:.2f} y anticipo de ${info['excedente']:.2f} registrados para {info['cliente']}")
+                    f"✅ Pago de ${info['saldo_pendiente']:.2f} y anticipo de ${info['excedente']:.2f} registrados para {info['cliente']}.")
 
-            elif opcion_excedente == "Abonar solo el saldo pendiente":
+            elif opcion_excedente == "Abonar solo el saldo pendiente (el resto se ignora)":
                 pago_dict = {
                     "Fecha": info["fecha"].isoformat(),
-                    "Descripción": f"Abono exacto al saldo pendiente para {info['cliente']}.",
+                    "Descripción": f"Abono exacto al saldo pendiente para {info['cliente']}. Excedente ignorado.",
                     "Categoría": "Cobranza",
                     "Tipo": "Ingreso",
-                    "Monto": float(info["saldo_cliente"]),
+                    "Monto": float(info["saldo_pendiente"]),
                     "Cliente": info["cliente"],
                     "Método de pago": info["metodo_pago"]
                 }
                 guardar_transaccion(pago_dict)
                 st.success(
-                    f"✅ Solo se registró el saldo pendiente de ${info['saldo_cliente']:.2f} para {info['cliente']}")
+                    f"✅ Solo se registró el saldo pendiente de ${info['saldo_pendiente']:.2f} para {info['cliente']}. El excedente fue ignorado.")
+
             elif opcion_excedente == "Cancelar operación":
                 st.info("Operación de pago cancelada por el usuario.")
 
+            # Limpiar banderas y recargar para refrescar la UI
             del st.session_state["mostrar_opciones_excedente"]
             del st.session_state["pago_excedente_info"]
             st.session_state.transacciones_data = leer_transacciones()
@@ -291,17 +387,18 @@ def render():
     if st.session_state.get("mostrar_opciones_anticipo", False):
         info = st.session_state["pago_anticipo_info"]
         with st.form("form_opciones_anticipo"):
-            st.write(f"El cliente {info['cliente']} no tiene saldo pendiente. Monto a registrar: ${info['monto']:.2f}.")
+            st.write(
+                f"El cliente **{info['cliente']}** no tiene saldo pendiente. Monto a registrar: **${info['monto']:.2f}**.")
             opcion_anticipo = st.radio(
                 "¿Desea registrar este monto como anticipo?",
                 ["Sí, registrar como anticipo", "No, cancelar"],
-                key="radio_anticipo_form"  # Added key
+                key="radio_anticipo_form"
             )
             col1, col2 = st.columns(2)
             with col1:
-                confirmar_anticipo = st.form_submit_button("Confirmar Opción")  # REMOVED KEY
+                confirmar_anticipo = st.form_submit_button("Confirmar Opción")
             with col2:
-                cancelar_opcion_anticipo = st.form_submit_button("Cancelar")  # REMOVED KEY
+                cancelar_opcion_anticipo = st.form_submit_button("Cancelar")
 
         if confirmar_anticipo:
             if opcion_anticipo == "Sí, registrar como anticipo":
@@ -319,6 +416,7 @@ def render():
             else:  # "No, cancelar"
                 st.info("Operación de pago cancelada por el usuario.")
 
+            # Limpiar banderas y recargar
             del st.session_state["mostrar_opciones_anticipo"]
             del st.session_state["pago_anticipo_info"]
             st.session_state.transacciones_data = leer_transacciones()
@@ -331,8 +429,7 @@ def render():
             st.rerun()
 
     st.divider()
-    st.subheader("📑 Historial de pagos")
-    # Mostrar todas las transacciones de Cobranza y Anticipo Cliente/Aplicado
+    st.subheader("📑 Historial de pagos y anticipos")
     historial_transacciones = st.session_state.transacciones_data[
         st.session_state.transacciones_data["Categoría"].astype(str).isin(
             ["Cobranza", "Anticipo Cliente", "Anticipo Aplicado"])
