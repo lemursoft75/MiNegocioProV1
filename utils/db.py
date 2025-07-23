@@ -6,6 +6,7 @@ import logging
 import base64
 import datetime
 import pandas as pd
+import json # ¡Importante: asegúrate de tener esto!
 
 # Carga variables de entorno desde .env
 load_dotenv()
@@ -20,35 +21,63 @@ def inicializar_firebase():
     global db
     if not firebase_admin._apps:
         logging.info("Inicializando Firebase...")
+        cred = None # Inicializamos cred en None
 
-        private_key_b64 = os.getenv("FIREBASE_PRIVATE_KEY_B64")
-
-        if private_key_b64:
+        # Opción 1: Cargar desde un archivo local especificado por SERVICE_ACCOUNT (¡Primera prioridad!)
+        cred_path = os.getenv("SERVICE_ACCOUNT")
+        if cred_path and os.path.exists(cred_path):
             try:
-                private_key_decoded = base64.b64decode(private_key_b64).decode('utf-8')
-                firebase_config = {
-                    "type": os.getenv("FIREBASE_TYPE"),
-                    "project_id": os.getenv("FIREBASE_PROJECT_ID"),
-                    "private_key_id": os.getenv("FIREBASE_PRIVATE_KEY_ID"),
-                    "private_key": private_key_decoded,
-                    "client_email": os.getenv("FIREBASE_CLIENT_EMAIL"),
-                    "client_id": os.getenv("FIREBASE_CLIENT_ID"),
-                    "auth_uri": os.getenv("FIREBASE_AUTH_URI"),
-                    "token_uri": os.getenv("FIREBASE_TOKEN_URI"),
-                    "auth_provider_x509_cert_url": os.getenv("FIREBASE_AUTH_PROVIDER_X509_CERT_URL"),
-                    "client_x509_cert_url": os.getenv("FIREBASE_CLIENT_X509_CERT_URL"),
-                }
-                cred = credentials.Certificate(firebase_config)
-                logging.info("Credenciales cargadas desde Base64 (Streamlit Cloud).")
+                cred = credentials.Certificate(cred_path)
+                logging.info(f"Credenciales cargadas desde archivo local: {cred_path}")
             except Exception as e:
-                logging.error(f"Error inicializando Firebase desde Base64: {e}")
-                raise
-        else:
-            cred_path = os.getenv("SERVICE_ACCOUNT")
-            if not cred_path or not os.path.exists(cred_path):
-                raise FileNotFoundError(f"Archivo de credenciales no encontrado en: {cred_path}")
-            cred = credentials.Certificate(cred_path)
-            logging.info(f"Credenciales cargadas desde archivo local: {cred_path}")
+                logging.error(f"Error al cargar credenciales desde archivo local '{cred_path}': {e}")
+                cred = None # Si falla, reseteamos cred para probar otras opciones
+
+        # Opción 2: Si la carga de archivo local falló, intentar con JSON completo en variable de entorno
+        if cred is None:
+            service_account_json_str = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+            if service_account_json_str:
+                try:
+                    service_account_info = json.loads(service_account_json_str)
+                    cred = credentials.Certificate(service_account_info)
+                    logging.info("Credenciales cargadas desde GOOGLE_APPLICATION_CREDENTIALS_JSON.")
+                except json.JSONDecodeError as e:
+                    logging.error(f"Error al decodificar el JSON de credenciales de GOOGLE_APPLICATION_CREDENTIALS_JSON: {e}")
+                    cred = None
+                except Exception as e:
+                    logging.error(f"Error al inicializar credenciales con GOOGLE_APPLICATION_CREDENTIALS_JSON: {e}")
+                    cred = None
+
+        # Opción 3: Si las opciones anteriores fallaron, intentar con variables individuales (Base64)
+        if cred is None:
+            private_key_b64 = os.getenv("FIREBASE_PRIVATE_KEY_B64")
+            if private_key_b64:
+                try:
+                    private_key_decoded = base64.b64decode(private_key_b64).decode('utf-8')
+                    firebase_config = {
+                        "type": os.getenv("FIREBASE_TYPE"),
+                        "project_id": os.getenv("FIREBASE_PROJECT_ID"),
+                        "private_key_id": os.getenv("FIREBASE_PRIVATE_KEY_ID"),
+                        "private_key": private_key_decoded,
+                        "client_email": os.getenv("FIREBASE_CLIENT_EMAIL"),
+                        "client_id": os.getenv("FIREBASE_CLIENT_ID"),
+                        "auth_uri": os.getenv("FIREBASE_AUTH_URI"),
+                        "token_uri": os.getenv("FIREBASE_TOKEN_URI"),
+                        "auth_provider_x509_cert_url": os.getenv("FIREBASE_AUTH_PROVIDER_X509_CERT_URL"),
+                        "client_x509_cert_url": os.getenv("FIREBASE_CLIENT_X509_CERT_URL"),
+                        "universe_domain": os.getenv("FIREBASE_UNIVERSE_DOMAIN", "googleapis.com")
+                    }
+                    cred = credentials.Certificate(firebase_config)
+                    logging.info("Credenciales cargadas desde variables individuales (con Base64).")
+                except Exception as e:
+                    logging.error(f"Error inicializando Firebase desde variables individuales: {e}")
+                    cred = None
+
+        # Si después de todas las opciones, aún no tenemos credenciales, levantar un error.
+        if cred is None:
+            raise ValueError("No se encontraron credenciales de Firebase válidas. "
+                             "Configura SERVICE_ACCOUNT, GOOGLE_APPLICATION_CREDENTIALS_JSON, "
+                             "o todas las variables FIREBASE_* en tu entorno/secrets.")
 
         firebase_admin.initialize_app(cred)
         db = firestore.client()

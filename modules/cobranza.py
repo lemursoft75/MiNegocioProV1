@@ -85,7 +85,8 @@ def render():
     saldos_intermedio = pd.merge(credito_otorgado, pagos_cobranza, on="Cliente", how="left").fillna(0)
     saldos_final = pd.merge(saldos_intermedio, anticipos_aplicados, on="Cliente", how="left").fillna(0)
 
-    saldos_final["Total Pagos y Aplicaciones"] = saldos_final["Pagos Cobranza"] + saldos_final["Anticipos Aplicados"]
+    # Si 'Pagos y Aplicaciones' debe reflejar solo los abonos directos al crédito
+    saldos_final["Total Pagos y Aplicaciones"] = saldos_final["Pagos Cobranza"]
     saldos_final["Saldo Pendiente"] = saldos_final["Crédito Otorgado"] - saldos_final["Total Pagos y Aplicaciones"]
 
     # Añadir clientes que solo tienen anticipos (sin deuda actual)
