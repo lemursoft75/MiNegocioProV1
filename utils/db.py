@@ -21,17 +21,16 @@ def inicializar_firebase():
         return
 
     if "FIREBASE_PRIVATE_KEY_B64" in st.secrets:
+        # Carga desde base64 como antes
         b64_str = st.secrets["FIREBASE_PRIVATE_KEY_B64"].replace('\n', '').replace('\r', '').strip()
         json_str = base64.b64decode(b64_str).decode("utf-8")
         cred_dict = json.loads(json_str)
         cred = credentials.Certificate(cred_dict)
 
-
     elif "SERVICE_ACCOUNT" in st.secrets:
-        cred_dict = st.secrets["SERVICE_ACCOUNT"]  # <-- sin json.loads
+        # Carga directamente el JSON en texto
+        cred_dict = json.loads(st.secrets["SERVICE_ACCOUNT"])
         cred = credentials.Certificate(cred_dict)
-
-
 
     else:
         raise Exception("No se encontró ninguna configuración de Firebase válida")
