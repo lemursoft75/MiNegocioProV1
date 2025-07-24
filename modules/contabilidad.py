@@ -22,7 +22,7 @@ def render():
         fecha = st.date_input("Fecha", value=datetime.date.today())
         descripcion = st.text_input("Descripción")
         # Ampliamos las categorías para que coincidan con las posibles del sistema
-        categoria = st.selectbox("Categoría", ["Ventas", "Servicios", "Compras", "Sueldos", "Otro", "Cobranza", "Anticipo Cliente", "Anticipo Aplicado"])
+        categoria = st.selectbox("Categoría", ["Ventas", "Servicios", "Compras", "Sueldos", "Papeleria", "Transporte", "Otro", "Cobranza", "Anticipo Cliente", "Anticipo Aplicado"])
         # --- CAMBIO AQUÍ: "Gasto" por "Egreso" en la UI ---
         tipo = st.radio("Tipo", ["Ingreso", "Egreso"])
         # --- FIN DEL CAMBIO ---

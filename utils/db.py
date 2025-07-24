@@ -45,9 +45,17 @@ def guardar_venta(venta_dict):
     logging.info("Venta guardada.")
 
 
-def guardar_cliente(cliente_dict):
-    db.collection("clientes").add(cliente_dict)
-    logging.info("Cliente guardado.")
+def guardar_cliente(id_cliente, cliente_dict):
+    db.collection("clientes").document(id_cliente).set(cliente_dict)
+    logging.info(f"Cliente '{id_cliente}' guardado.")
+
+
+
+def actualizar_cliente(id_cliente, datos_nuevos):
+    db.collection("clientes").document(id_cliente).update(datos_nuevos)
+    logging.info(f"Cliente '{id_cliente}' actualizado.")
+
+
 
 
 def guardar_transaccion(transaccion_dict):
@@ -153,11 +161,13 @@ def calcular_balance_contable():
 
 
 def leer_clientes():
-    columnas = ["Nombre", "Correo", "Teléfono", "Dirección", "RFC", "Límite de crédito"]
+    columnas = ["ID", "Nombre", "Correo", "Teléfono", "Empresa", "RFC", "Límite de crédito"]
     docs = db.collection("clientes").stream()
     clientes = []
+
     for doc in docs:
         data = doc.to_dict()
+        data["ID"] = doc.id  # 🔥 ¡Aquí se guarda el ID del documento!
         cliente_normalizado = {col: data.get(col, None) for col in columnas}
         clientes.append(cliente_normalizado)
 
@@ -165,14 +175,18 @@ def leer_clientes():
         return pd.DataFrame(columns=columnas)
 
     df = pd.DataFrame(clientes)
+
+    # Asegurar que todas las columnas existan
     for col in columnas:
         if col not in df.columns:
             df[col] = None
 
+    # Convertir "Límite de crédito" a numérico por si acaso
     if "Límite de crédito" in df.columns:
         df["Límite de crédito"] = pd.to_numeric(df["Límite de crédito"], errors='coerce').fillna(0.0)
 
     return df[columnas]
+
 
 
 def leer_productos():
