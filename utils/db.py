@@ -28,9 +28,12 @@ def inicializar_firebase():
         cred = credentials.Certificate(cred_dict)
 
     elif "SERVICE_ACCOUNT" in st.secrets:
-        # Carga directamente el JSON en texto
-        cred_dict = json.loads(st.secrets["SERVICE_ACCOUNT"])
+        # Antes:
+        # cred_dict = json.loads(st.secrets["SERVICE_ACCOUNT"])
+        # Ahora:
+        cred_dict = st.secrets["SERVICE_ACCOUNT"]
         cred = credentials.Certificate(cred_dict)
+
 
     else:
         raise Exception("No se encontró ninguna configuración de Firebase válida")
