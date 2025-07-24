@@ -27,13 +27,14 @@ def inicializar_firebase():
         cred_dict = json.loads(json_str)
         cred = credentials.Certificate(cred_dict)
 
-    elif "SERVICE_ACCOUNT" in st.secrets:
-        # Carga directamente el JSON en texto
-        cred_dict = json.loads(st.secrets["SERVICE_ACCOUNT"])
-        cred = credentials.Certificate(cred_dict)
+    elif isinstance(st.secrets["SERVICE_ACCOUNT"], dict):
+        # Si ya es un dict (raro, pero posible)
+        cred = credentials.Certificate(st.secrets["SERVICE_ACCOUNT"])
 
     else:
-        raise Exception("No se encontró ninguna configuración de Firebase válida")
+        # Si es string plano
+        cred_dict = json.loads(st.secrets["SERVICE_ACCOUNT"])
+        cred = credentials.Certificate(cred_dict)
 
     firebase_admin.initialize_app(cred)
     db = firestore.client()
