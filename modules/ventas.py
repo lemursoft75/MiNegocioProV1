@@ -1,11 +1,19 @@
-# modules/ventas.py
-
 import streamlit as st
+from io import BytesIO
 import pandas as pd
 import plotly.express as px
 from utils.db import guardar_venta, leer_ventas, leer_transacciones, guardar_transaccion, leer_clientes, leer_productos, \
     actualizar_producto_por_clave
 
+
+# Helper function to convert DataFrame to Excel
+def to_excel(df):
+    output = BytesIO()
+    writer = pd.ExcelWriter(output, engine='xlsxwriter')
+    df.to_excel(writer, index=False, sheet_name='Ventas')
+    writer.close()
+    processed_data = output.getvalue()
+    return processed_data
 
 def render():
     st.title("💸 Ventas")
@@ -70,10 +78,10 @@ def render():
     if not producto_info_selected.empty and "Precio Unitario" in producto_info_selected.columns:
         precio_from_df = producto_info_selected["Precio Unitario"].values[0]
         precio = float(precio_from_df) if pd.notna(precio_from_df) else 0.0
-    total_ui_display = cantidad * precio  # Usar una variable diferente para evitar confusión
+    total_ui_display_original = cantidad * precio  # Use a different variable name for clarity
 
     st.markdown(f"**Precio unitario:** ${precio:.2f}")
-    st.markdown(f"**Total de la venta:** ${total_ui_display:.2f}")
+    st.markdown(f"**Total de la venta:** ${total_ui_display_original:.2f}")
 
     # --- Lógica y UI para Anticipos Disponibles (VISIBLES) ---
     anticipos_cliente_total = st.session_state.transacciones_data[
@@ -90,30 +98,37 @@ def render():
 
     saldo_anticipos = float(anticipos_cliente_total) - float(anticipos_aplicados_total)
 
-    aplicar_anticipo = 0.0  # Inicializar a 0.0
+    # Initialize or retrieve application amount for this sale
+    # This key ensures that the value persists across reruns but can be reset by the user.
+    if "input_anticipo_visible" not in st.session_state:
+        st.session_state["input_anticipo_visible"] = 0.0
+
     if saldo_anticipos > 0:
         st.subheader("Gestión de Anticipos")
         st.info(f"✨ **Anticipo disponible para {cliente}:** ${saldo_anticipos:.2f}")
 
         # Permitir al usuario decidir cuánto anticipo aplicar
-        # El valor máximo es el mínimo entre el saldo disponible y el total de la venta (el que se muestra en UI)
-        aplicar_anticipo = st.number_input(
+        # The default value should be 0 unless it's a specific scenario.
+        # We use a helper variable to manage the actual displayed value vs the stored session_state value.
+        user_input_anticipo = st.number_input(
             f"¿Cuánto anticipo desea aplicar a esta venta?",
             min_value=0.0,
-            max_value=min(saldo_anticipos, total_ui_display),  # Usar total_ui_display aquí
-            value=0.0,  # Valor inicial en 0, para que el usuario decida
+            max_value=min(saldo_anticipos, total_ui_display_original),  # Max is the lower of available anticipo or sale total
+            value=st.session_state["input_anticipo_visible"], # Use the value from session state
             step=0.01,
-            key="input_anticipo_visible"
+            key="input_anticipo_visible_widget" # Use a different key for the widget to not conflict with the session_state key
         )
-        st.session_state["anticipo_seleccionado_para_venta"] = aplicar_anticipo  # Guardar en session_state
+        # Update the session_state variable when the widget changes
+        st.session_state["input_anticipo_visible"] = user_input_anticipo
     else:
-        # Si no hay anticipos disponibles, asegurar que el valor en session_state sea 0
-        st.session_state["anticipo_seleccionado_para_venta"] = 0.0
+        # If no anticipos available, ensure the input_anticipo_visible is reset to 0
+        st.session_state["input_anticipo_visible"] = 0.0
 
-    # --- FIN Lógica y UI para Anticipos Disponibles ---
+    # The actual anticipo amount to be applied for calculations
+    aplicar_anticipo = st.session_state["input_anticipo_visible"]
 
-    # Calcular el total ajustado después de aplicar el anticipo (para la UI)
-    total_ajustado_ui_display = total_ui_display - aplicar_anticipo
+    # Calculate the adjusted total after applying the anticipo (for UI)
+    total_ajustado_ui_display = total_ui_display_original - aplicar_anticipo
     st.markdown(f"**Total de la venta (ajustado por anticipo):** ${total_ajustado_ui_display:.2f}")
 
     # --- INICIO DEL FORMULARIO PRINCIPAL DE VENTA ---
@@ -151,21 +166,20 @@ def render():
         st.markdown(f"🟢 **Disponible para crédito:** ${credito_disponible:.2f}")
 
         # Monto contado y método de pago
-        # El max_value debe ser el total ajustado, no el total original
+        # The max_value must be the total adjusted, not the original total
         monto_contado = st.number_input("💵 Monto pagado al contado", min_value=0.0,
-                                        max_value=float(total_ajustado_ui_display),  # Usar el total ajustado para UI
+                                        max_value=float(total_ajustado_ui_display),
                                         step=0.01, key="venta_monto_contado_final")
         metodo_pago = st.selectbox("Método de pago (contado)", ["Efectivo", "Transferencia", "Tarjeta"],
                                    key="venta_metodo_pago_final")
 
-        monto_credito = total_ajustado_ui_display - monto_contado  # Calcular basado en el total ajustado para UI
+        monto_credito = total_ajustado_ui_display - monto_contado  # Calculate based on the adjusted total for UI
         st.markdown(f"**🧾 Crédito solicitado:** ${monto_credito:.2f}")
 
         submitted = st.form_submit_button("Registrar venta")
 
         if submitted:
             # --- RECARGAR DATOS FRESCOS JUSTO ANTES DE PROCESAR ---
-            # Esto es CRÍTICO para asegurar que las validaciones se hagan con los valores más actuales
             st.session_state.ventas = leer_ventas()
             for col in numeric_cols_ventas:
                 if col in st.session_state.ventas.columns:
@@ -180,12 +194,11 @@ def render():
             st.session_state.productos = leer_productos()  # Recargar productos para existencia y precio
 
             # --- OBTENER VALORES ACTUALES DE LOS INPUTS DEL FORMULARIO ---
-            # Estos son los valores que el usuario ingresó y que están en los widgets
             submitted_fecha = fecha
             submitted_cliente = cliente
             submitted_producto = producto
-            submitted_cantidad = cantidad  # Ya es el valor del number_input
-            submitted_monto_contado = monto_contado  # Ya es el valor del number_input
+            submitted_cantidad = cantidad
+            submitted_monto_contado = monto_contado
             submitted_metodo_pago = metodo_pago
 
             # --- RECALCULAR PRECIO Y EXISTENCIA AL MOMENTO DEL SUBMIT CON DATOS FRESCOS ---
@@ -203,15 +216,15 @@ def render():
             # --- RECALCULAR TOTALES Y COMPONENTES CON LOS VALORES DEL SUBMIT ---
             submitted_total_original = submitted_cantidad * submitted_precio
 
-            # Recuperar el valor del anticipo que el usuario seleccionó y está en session_state
-            anticipo_final_aplicado = st.session_state.get("anticipo_seleccionado_para_venta", 0.0)
+            # This is the crucial part: Use the *explicitly entered* anticipo value
+            anticipo_final_aplicado = st.session_state.get("input_anticipo_visible", 0.0)
 
             submitted_total_ajustado = submitted_total_original - anticipo_final_aplicado
 
-            # El monto_credito_f DEBE ser la diferencia entre el total ajustado y el monto contado
+            # The monto_credito_f MUST be the difference between the adjusted total and the submitted cash amount
             monto_credito_f = submitted_total_ajustado - submitted_monto_contado
 
-            # Asegurar que los montos no sean negativos debido a flotantes
+            # Ensure amounts are not negative due to floating point inaccuracies
             monto_credito_f = max(0.0, monto_credito_f)
             submitted_monto_contado = max(0.0, submitted_monto_contado)
             anticipo_final_aplicado = max(0.0, anticipo_final_aplicado)
@@ -257,37 +270,42 @@ def render():
 
             suma_componentes = submitted_monto_contado + monto_credito_f + anticipo_final_aplicado
 
-            # Definir una pequeña tolerancia para la comparación de punto flotante
-            epsilon = 0.01  # Tolerancia de un centavo
+            # Define a small tolerance for floating point comparison
+            epsilon = 0.01
 
-            diferencia = abs(round(suma_componentes, 2) - round(submitted_total_original, 2))
+            # Validation against the original total should use submitted_total_original
+            # And the sum of components must match it.
+            # No, the sum of components (contado + credito + anticipo) must equal submitted_total_original
+            # because 'monto_credito_f' is (total_original - anticipo_aplicado - monto_contado)
+            # This makes: monto_contado + (total_original - anticipo_aplicado - monto_contado) + anticipo_aplicado = total_original
+            # So the existing validation is correct in principle:
+            diferencia_total = abs(round(suma_componentes, 2) - round(submitted_total_original, 2))
 
-            # Validaciones finales
+            # Final validations
             if submitted_cantidad > current_existencia and current_existencia >= 0:
                 st.error(
                     f"❌ No hay suficiente existencia de {submitted_producto}. Solo quedan {current_existencia} unidades.")
-            elif abs(round(suma_componentes, 2) - round(submitted_total_original,
-                                                        2)) > epsilon:  # Comparar contra el total original recalculado
+            elif diferencia_total > epsilon:
                 st.error(
                     "❌ El total ingresado (contado + crédito + anticipo) no coincide con el total de la venta original. "
-                    f"Desfase: {abs(round(suma_componentes, 2) - round(submitted_total_original, 2)):.4f}"
+                    f"Desfase: {diferencia_total:.4f}"
                 )
-            elif monto_credito_f > current_credito_disponible + epsilon:  # Añadir epsilon aquí también para seguridad
+            elif monto_credito_f > current_credito_disponible + epsilon:
                 st.error(
                     f"❌ El crédito solicitado (${monto_credito_f:.2f}) excede el disponible (${current_credito_disponible:.2f}).")
             else:
-                # Determinar Tipo de Venta correctamente
+                # Determine Tipo de Venta correctly
                 tipo_venta = ""
                 if monto_credito_f > 0 and (submitted_monto_contado > 0 or anticipo_final_aplicado > 0):
                     tipo_venta = "Mixta"
                 elif monto_credito_f > 0 and submitted_monto_contado == 0 and anticipo_final_aplicado == 0:
                     tipo_venta = "Crédito"
                 elif monto_credito_f == 0 and (submitted_monto_contado > 0 or anticipo_final_aplicado > 0):
-                    tipo_venta = "Contado"  # Puede ser 'Contado' si solo es anticipo, o solo efectivo
-                elif monto_credito_f == 0 and submitted_monto_contado == 0 and anticipo_final_aplicado == 0 and submitted_total_original == 0:  # Usar submitted_total_original
+                    tipo_venta = "Contado"
+                elif monto_credito_f == 0 and submitted_monto_contado == 0 and anticipo_final_aplicado == 0 and submitted_total_original == 0:
                     tipo_venta = "Gratuita"
                 else:
-                    tipo_venta = "Indefinido"  # Fallback si no encaja
+                    tipo_venta = "Indefinido"
 
                 venta_dict = {
                     "Fecha": submitted_fecha.isoformat(),
@@ -295,10 +313,10 @@ def render():
                     "Producto": submitted_producto,
                     "Cantidad": float(submitted_cantidad),
                     "Precio Unitario": float(submitted_precio),
-                    "Total": submitted_total_original,  # Guardar el total original de la venta recalculado
+                    "Total": submitted_total_original,
                     "Monto Crédito": monto_credito_f,
                     "Monto Contado": submitted_monto_contado,
-                    "Anticipo Aplicado": anticipo_final_aplicado,  # Usar el valor decidido por el usuario
+                    "Anticipo Aplicado": anticipo_final_aplicado,
                     "Método de pago": submitted_metodo_pago if submitted_monto_contado > 0 else (
                         "Crédito" if monto_credito_f > 0 else (
                             "Anticipo" if anticipo_final_aplicado > 0 else "N/A"
@@ -324,10 +342,10 @@ def render():
                         "Fecha": submitted_fecha.isoformat(),
                         "Descripción": f"Anticipo aplicado a venta de {submitted_cliente}",
                         "Categoría": "Anticipo Aplicado",
-                        "Tipo": "Gasto",  # Desde la perspectiva del anticipo, es una reducción
+                        "Tipo": "Gasto",
                         "Monto": float(anticipo_final_aplicado),
                         "Cliente": submitted_cliente,
-                        "Método de pago": "Anticipo"  # Método de pago específico
+                        "Método de pago": "Anticipo"
                     })
 
                 # --- DESCONTAR CANTIDAD DEL INVENTARIO ---
@@ -337,19 +355,48 @@ def render():
                 actualizar_producto_por_clave(producto_clave, {"Cantidad": nueva_cantidad_inventario})
                 # --- FIN DESCUENTO INVENTARIO ---
 
-                # La actualización de st.session_state.ventas y transacciones_data ya se hace al inicio
-                # y al final de este bloque, lo cual es redundante pero asegura la UI fresca.
-                # Se puede simplificar si se quiere optimizar, pero por ahora está bien para depuración.
+                # Update session state after successful operation
                 st.session_state.ventas = leer_ventas()
                 st.session_state.transacciones_data = leer_transacciones()
-                st.session_state.productos = leer_productos()  # ¡Actualizar productos también!
+                st.session_state.productos = leer_productos()
+
+                # Crucial for the next sale: Reset the anticipo input to 0 after a successful sale
+                st.session_state["input_anticipo_visible"] = 0.0
 
                 st.success("✅ Venta registrada correctamente")
-                st.rerun()  # Volver a renderizar para limpiar el formulario y mostrar la venta reciente
+                st.rerun()
 
     st.divider()
     st.subheader("📋 Histórico de ventas")
-    st.dataframe(st.session_state.ventas, use_container_width=True)
+
+    # --- Date Range Selection for Export ---
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("Fecha de inicio", value=pd.to_datetime(st.session_state.ventas["Fecha"]).min() if not st.session_state.ventas.empty else None)
+    with col2:
+        end_date = st.date_input("Fecha de fin", value=pd.to_datetime(st.session_state.ventas["Fecha"]).max() if not st.session_state.ventas.empty else None)
+
+    filtered_ventas_df = st.session_state.ventas.copy()
+
+    if not filtered_ventas_df.empty:
+        filtered_ventas_df["Fecha"] = pd.to_datetime(filtered_ventas_df["Fecha"])
+        if start_date:
+            filtered_ventas_df = filtered_ventas_df[filtered_ventas_df["Fecha"] >= pd.to_datetime(start_date)]
+        if end_date:
+            filtered_ventas_df = filtered_ventas_df[filtered_ventas_df["Fecha"] <= pd.to_datetime(end_date)]
+
+    st.dataframe(filtered_ventas_df, use_container_width=True)
+
+    if not filtered_ventas_df.empty:
+        st.download_button(
+            label="Descargar histórico de ventas a Excel",
+            data=to_excel(filtered_ventas_df),
+            file_name="historico_ventas.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.info("No hay datos de ventas para el rango de fechas seleccionado o en general.")
+
 
     if not st.session_state.ventas.empty:
         st.subheader("📊 Ingresos diarios")
