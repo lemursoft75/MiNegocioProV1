@@ -155,10 +155,20 @@ def leer_cobranza():
 
 def calcular_balance_contable():
     transacciones = leer_transacciones()
-    ingresos = transacciones.query("Tipo == 'Ingreso'")["Monto"].sum()
-    gastos = transacciones.query("Tipo == 'Egreso'")["Monto"].sum()
-    balance = ingresos - gastos
-    return ingresos, gastos, balance
+
+    # Asegurarse de que el DataFrame no esté vacío
+    if transacciones.empty:
+        return 0, 0, 0
+
+    # Convertir 'Monto' a tipo numérico de forma segura
+    transacciones['Monto'] = pd.to_numeric(transacciones['Monto'], errors='coerce').fillna(0)
+
+    # Filtrar ingresos y egresos usando el valor exacto 'Ingreso' y 'Egreso'
+    ingresos = transacciones[transacciones['Tipo'] == 'Ingreso']['Monto'].sum()
+    egresos = transacciones[transacciones['Tipo'] == 'Egreso']['Monto'].sum()
+
+    balance = ingresos - egresos
+    return ingresos, egresos, balance
 
 
 def leer_clientes():

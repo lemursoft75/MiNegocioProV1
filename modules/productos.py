@@ -1,5 +1,3 @@
-# modules/productos.py
-
 import streamlit as st
 import io
 import pandas as pd
@@ -229,7 +227,7 @@ def render():
         st.info("No hay productos registrados para reabastecer.")
 
     st.divider()
-    st.subheader("🛠️ Editar producto (Precio, Costo, Descripción)")
+    st.subheader("🛠️ Editar producto (Nombre, Precio, Costo, Descripción)")
 
     if not st.session_state.productos.empty:
         claves_disponibles_editar = st.session_state.productos["Clave"].dropna().unique().tolist()
@@ -241,6 +239,8 @@ def render():
             datos_editar = st.session_state.productos[filtro_editar].iloc[0]
 
             # Campos solo para edición, no para añadir stock
+            # --- CAMBIO AQUI: se añade el campo de nombre ---
+            nuevo_nombre = st.text_input("Nuevo nombre", value=datos_editar["Nombre"], key="nuevo_nombre_edit")
             nuevo_precio = st.number_input("Nuevo precio", value=float(datos_editar["Precio Unitario"]), format="%.2f",
                                            key="nuevo_precio_edit")
             nuevo_costo = st.number_input("Nuevo costo unitario", value=float(datos_editar.get("Costo Unitario", 0.0)),
@@ -252,12 +252,14 @@ def render():
             with col1_edit:
                 if st.button("✏️ Actualizar detalles del producto"):
                     actualizar_producto_por_clave(seleccionado_editar, {
+                        "Nombre": nuevo_nombre, # --- CAMBIO AQUI: se pasa el nuevo nombre al update ---
                         "Precio Unitario": nuevo_precio,
                         "Costo Unitario": nuevo_costo,
                         "Descripción": nueva_descripcion
                     })
                     idx = st.session_state.productos.index[st.session_state.productos["Clave"] == seleccionado_editar][
                         0]
+                    st.session_state.productos.at[idx, "Nombre"] = nuevo_nombre # --- CAMBIO AQUI: se actualiza el nombre en la session state ---
                     st.session_state.productos.at[idx, "Precio Unitario"] = nuevo_precio
                     st.session_state.productos.at[idx, "Costo Unitario"] = nuevo_costo
                     st.session_state.productos.at[idx, "Descripción"] = nueva_descripcion
