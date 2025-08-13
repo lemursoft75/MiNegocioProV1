@@ -69,8 +69,34 @@ def render():
 
         resumen_tipo = st.session_state.transacciones.groupby("Tipo")["Monto"].sum().reset_index()
         fig = px.pie(resumen_tipo, names="Tipo", values="Monto",
-                     title="Ingresos vs Egresos", template="plotly_white") # Título actualizado
+                     title="Ingresos vs Egresos", template="plotly_white")
         st.plotly_chart(fig, use_container_width=True)
+
+        # 📌 Desglose por tipo y categoría
+        st.subheader("📑 Desglose por tipo y categoría")
+        if "Categoría" in st.session_state.transacciones.columns:
+            resumen_tipo_categoria = (
+                st.session_state.transacciones
+                .groupby(["Tipo", "Categoría"])["Monto"]
+                .sum()
+                .reset_index()
+                .sort_values(by="Monto", ascending=False)
+            )
+
+            st.dataframe(resumen_tipo_categoria, use_container_width=True)
+
+            fig_tc = px.bar(
+                resumen_tipo_categoria,
+                x="Categoría",
+                y="Monto",
+                color="Tipo",
+                barmode="group",
+                title="Importe por categoría y tipo",
+                template="plotly_white",
+                text_auto=".2s"
+            )
+            st.plotly_chart(fig_tc, use_container_width=True)
+
 
         st.subheader("📤 Exportar historial contable")
 

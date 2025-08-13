@@ -78,6 +78,37 @@ def render():
 
 
     st.divider()
+    st.markdown("### 📑 Desglose por tipo y categoría")
+
+    if not transacciones_df.empty and "Categoría" in transacciones_df.columns:
+        resumen_tipo_categoria = (
+            transacciones_df
+            .groupby(["Tipo", "Categoría"])["Monto"]
+            .sum()
+            .reset_index()
+            .sort_values(by="Monto", ascending=False)
+        )
+
+        # 📋 Mostrar tabla
+        st.dataframe(resumen_tipo_categoria, use_container_width=True)
+
+        # 📊 Gráfico de barras
+        fig_tc = px.bar(
+            resumen_tipo_categoria,
+            x="Monto",
+            y="Categoría",
+            color="Tipo",
+            barmode="group",
+            title="Importe por categoría y tipo",
+            template="plotly_white",
+            text_auto=".2s",
+            orientation="h"
+        )
+        st.plotly_chart(fig_tc, use_container_width=True)
+    else:
+        st.info("No hay datos de transacciones para mostrar el desglose por categoría.")
+
+    st.divider()
     st.markdown("### 🧩 Indicadores administrativos")
     col4, col5 = st.columns(2)
     with col4:
