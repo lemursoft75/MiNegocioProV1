@@ -83,6 +83,23 @@ def render():
     st.markdown(f"**Precio unitario:** ${precio:.2f}")
     st.markdown(f"**Total de la venta:** ${total_ui_display_original:.2f}")
 
+    # --- Campo de descuento ---
+    descuento = st.number_input(
+        "Descuento ($)",
+        min_value=0.0,
+        max_value=float(total_ui_display_original),
+        value=0.0,
+        step=0.01,
+        key="venta_descuento"
+    )
+
+    # Calcular importe neto antes de anticipo
+    importe_neto = total_ui_display_original - descuento
+    if importe_neto < 0:
+        importe_neto = 0.0
+
+    st.markdown(f"**Importe neto (después de descuento):** ${importe_neto:.2f}")
+
     # --- Lógica y UI para Anticipos Disponibles (VISIBLES) ---
     anticipos_cliente_total = st.session_state.transacciones_data[
         (st.session_state.transacciones_data["Categoría"] == "Anticipo Cliente") &
@@ -128,7 +145,7 @@ def render():
     aplicar_anticipo = st.session_state["input_anticipo_visible"]
 
     # Calculate the adjusted total after applying the anticipo (for UI)
-    total_ajustado_ui_display = total_ui_display_original - aplicar_anticipo
+    total_ajustado_ui_display = importe_neto - aplicar_anticipo
     st.markdown(f"**Total de la venta (ajustado por anticipo):** ${total_ajustado_ui_display:.2f}")
 
     # --- INICIO DEL FORMULARIO PRINCIPAL DE VENTA ---
@@ -215,11 +232,15 @@ def render():
 
             # --- RECALCULAR TOTALES Y COMPONENTES CON LOS VALORES DEL SUBMIT ---
             submitted_total_original = submitted_cantidad * submitted_precio
+            submitted_descuento = st.session_state.get("venta_descuento", 0.0)
+            submitted_importe_neto = submitted_total_original - submitted_descuento
+            if submitted_importe_neto < 0:
+                submitted_importe_neto = 0.0
 
             # This is the crucial part: Use the *explicitly entered* anticipo value
             anticipo_final_aplicado = st.session_state.get("input_anticipo_visible", 0.0)
 
-            submitted_total_ajustado = submitted_total_original - anticipo_final_aplicado
+            submitted_total_ajustado = submitted_importe_neto - anticipo_final_aplicado
 
             # The monto_credito_f MUST be the difference between the adjusted total and the submitted cash amount
             monto_credito_f = submitted_total_ajustado - submitted_monto_contado
@@ -314,6 +335,8 @@ def render():
                     "Cantidad": float(submitted_cantidad),
                     "Precio Unitario": float(submitted_precio),
                     "Total": submitted_total_original,
+                    "Descuento": float(submitted_descuento),
+                    "Importe Neto": float(submitted_importe_neto),
                     "Monto Crédito": monto_credito_f,
                     "Monto Contado": submitted_monto_contado,
                     "Anticipo Aplicado": anticipo_final_aplicado,
