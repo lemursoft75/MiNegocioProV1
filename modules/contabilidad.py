@@ -5,7 +5,7 @@ import io
 import datetime
 from utils.db import guardar_transaccion, leer_transacciones
 
-# --- Cachear transacciones para evitar consultas excesivas ---
+# --- Cachear transacciones ---
 @st.cache_data(ttl=60)
 def get_transacciones():
     df = pd.DataFrame(leer_transacciones())
@@ -25,7 +25,7 @@ def render():
 
     st.title("🧾 Contabilidad")
 
-    # Cargar transacciones (cacheado)
+    # Cargar transacciones
     if "transacciones" not in st.session_state:
         st.session_state.transacciones = get_transacciones()
     elif st.session_state.get("reload_transacciones", False):
@@ -36,6 +36,8 @@ def render():
     with st.form("form_registro"):
         st.subheader("Registrar nueva transacción")
         fecha = st.date_input("Fecha", value=datetime.date.today())
+        clave_producto = st.text_input("Clave del producto")  # NUEVO
+        cantidad = st.number_input("Cantidad", min_value=0, step=1)  # NUEVO
         descripcion = st.text_input("Descripción")
         categoria = st.selectbox(
             "Categoría",
@@ -53,6 +55,8 @@ def render():
 
             guardar_transaccion({
                 "Fecha": fecha.isoformat(),
+                "Clave Producto": clave_producto,  # NUEVO
+                "Cantidad": cantidad,  # NUEVO
                 "Descripción": descripcion,
                 "Categoría": categoria,
                 "Tipo": tipo,
@@ -69,6 +73,7 @@ def render():
         st.info("Aún no hay transacciones registradas.")
         return
 
+    # Mostrar todas las columnas (incluyendo Clave y Cantidad)
     st.dataframe(st.session_state.transacciones, use_container_width=True)
 
     st.divider()

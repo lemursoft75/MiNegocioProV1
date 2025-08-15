@@ -81,16 +81,26 @@ def render():
     # 🚀 Cálculo de Ingresos y Egresos
     ingresos_totales, egresos_totales, balance_neto = calcular_balance_contable()
 
-    col1, col2, col3 = st.columns(3)
+    # ✅ Cálculo de ingresos reales (ventas al contado + cobranza)
+    ventas_contado = ventas_df["Monto Contado"].sum() if "Monto Contado" in ventas_df.columns else 0.0
+    cobranza_credito = 0.0
+    if not transacciones_df.empty and "Categoría" in transacciones_df.columns:
+        cobranza_credito = transacciones_df[
+            transacciones_df["Categoría"] == "Cobranza"
+        ]["Monto"].sum()
+    ingresos_reales = ventas_contado + cobranza_credito
+
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Ingresos Totales", f"${ingresos_totales:,.0f}")
     col2.metric("Egresos Totales", f"${egresos_totales:,.0f}")
     col3.metric("Balance Neto", f"${balance_neto:,.0f}")
+    col4.metric("Ingresos Reales", f"${ingresos_reales:,.0f}")
 
     st.divider()
     st.markdown("### 📈 Composición financiera")
     df_bar = pd.DataFrame({
-        "Categoría": ["Ingresos", "Egresos", "Balance Neto"],
-        "Monto": [ingresos_totales, egresos_totales, balance_neto]
+        "Categoría": ["Ingresos", "Egresos", "Balance Neto", "Ingresos Reales"],
+        "Monto": [ingresos_totales, egresos_totales, balance_neto, ingresos_reales]
     })
     st.plotly_chart(px.bar(df_bar, x="Categoría", y="Monto", color="Categoría",
                            template="plotly_white", title="Distribución por tipo"),
