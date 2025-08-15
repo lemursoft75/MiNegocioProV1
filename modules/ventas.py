@@ -15,6 +15,7 @@ def to_excel(df):
     processed_data = output.getvalue()
     return processed_data
 
+
 def render():
     st.title("💸 Ventas")
 
@@ -47,6 +48,77 @@ def render():
         st.session_state.transacciones_data["Monto"] = pd.to_numeric(st.session_state.transacciones_data["Monto"],
                                                                      errors='coerce').fillna(0.0)
 
+    # --- Sincronizar ventas con transacciones ---
+    ventas_df = st.session_state.ventas
+    transacciones_df = st.session_state.transacciones_data
+
+    ventas_data = ventas_df.to_dict(orient="records")
+    transacciones_data = transacciones_df.to_dict(orient="records")
+
+    # Creamos un set clave para buscar rápido: (Fecha, Cliente, Monto)
+    transacciones_claves = {
+        (t.get("Fecha"), t.get("Cliente"), round(float(t.get("Monto", 0)), 2))
+        for t in transacciones_data
+    }
+
+    transacciones_creadas = 0
+    for venta in ventas_data:
+        fecha = venta.get("Fecha")
+        cliente = venta.get("Cliente")
+        monto_contado = float(venta.get("Monto Contado", 0) or 0)
+        monto_credito = float(venta.get("Monto Crédito", 0) or 0)
+        anticipo = float(venta.get("Anticipo Aplicado", 0) or 0)
+
+        # Contado
+        if monto_contado > 0:
+            clave = (fecha, cliente, round(monto_contado, 2))
+            if clave not in transacciones_claves:
+                guardar_transaccion({
+                    "Fecha": fecha,
+                    "Descripción": f"Pago de contado por venta a {cliente}",
+                    "Categoría": "Ventas",
+                    "Tipo": "Ingreso",
+                    "Monto": monto_contado,
+                    "Cliente": cliente,
+                    "Método de pago": venta.get("Método de pago", "Contado")
+                })
+                transacciones_creadas += 1
+
+        # Anticipo
+        if anticipo > 0:
+            clave = (fecha, cliente, round(anticipo, 2))
+            if clave not in transacciones_claves:
+                guardar_transaccion({
+                    "Fecha": fecha,
+                    "Descripción": f"Anticipo aplicado a venta de {cliente}",
+                    "Categoría": "Anticipo Aplicado",
+                    "Tipo": "Egreso",
+                    "Monto": anticipo,
+                    "Cliente": cliente,
+                    "Método de pago": "Anticipo"
+                })
+                transacciones_creadas += 1
+
+        # Crédito
+        if monto_credito > 0:
+            clave = (fecha, cliente, round(monto_credito, 2))
+            if clave not in transacciones_claves:
+                guardar_transaccion({
+                    "Fecha": fecha,
+                    "Descripción": f"Venta a crédito para {cliente}",
+                    "Categoría": "Ventas a Crédito",
+                    "Tipo": "Ingreso",
+                    "Monto": monto_credito,
+                    "Cliente": cliente,
+                    "Método de pago": "Crédito"
+                })
+                transacciones_creadas += 1
+
+    if transacciones_creadas > 0:
+        st.success(f"🔄 {transacciones_creadas} transacciones faltantes fueron agregadas automáticamente.")
+        st.session_state.transacciones_data = leer_transacciones()  # Recargar las transacciones después de la sincronización
+
+    # --- Resto del código de la aplicación de ventas ---
     st.subheader("Registrar nueva venta")
 
     # --- CAMPOS QUE DEBEN ACTUALIZARSE AL CAMBIAR SU VALOR (FUERA DEL FORM) ---
@@ -110,7 +182,7 @@ def render():
     anticipos_aplicados_total = st.session_state.transacciones_data[
         (st.session_state.transacciones_data["Categoría"] == "Anticipo Aplicado") &
         (st.session_state.transacciones_data["Cliente"] == cliente) &
-        (st.session_state.transacciones_data["Tipo"] == "Gasto")  # Asegúrate que esto sea consistente con tu db.py
+        (st.session_state.transacciones_data["Tipo"] == "Egreso")  # ✅
         ]["Monto"].sum()
 
     saldo_anticipos = float(anticipos_cliente_total) - float(anticipos_aplicados_total)
@@ -130,10 +202,12 @@ def render():
         user_input_anticipo = st.number_input(
             f"¿Cuánto anticipo desea aplicar a esta venta?",
             min_value=0.0,
-            max_value=min(saldo_anticipos, total_ui_display_original),  # Max is the lower of available anticipo or sale total
-            value=st.session_state["input_anticipo_visible"], # Use the value from session state
+            max_value=min(saldo_anticipos, total_ui_display_original),
+            # Max is the lower of available anticipo or sale total
+            value=st.session_state["input_anticipo_visible"],  # Use the value from session state
             step=0.01,
-            key="input_anticipo_visible_widget" # Use a different key for the widget to not conflict with the session_state key
+            key="input_anticipo_visible_widget"
+            # Use a different key for the widget to not conflict with the session_state key
         )
         # Update the session_state variable when the widget changes
         st.session_state["input_anticipo_visible"] = user_input_anticipo
@@ -291,32 +365,29 @@ def render():
 
             suma_componentes = submitted_monto_contado + monto_credito_f + anticipo_final_aplicado
 
-            # Define a small tolerance for floating point comparison
+            # Tolerancia para comparación de punto flotante
             epsilon = 0.01
 
-            # Validation against the original total should use submitted_total_original
-            # And the sum of components must match it.
-            # No, the sum of components (contado + credito + anticipo) must equal submitted_total_original
-            # because 'monto_credito_f' is (total_original - anticipo_aplicado - monto_contado)
-            # This makes: monto_contado + (total_original - anticipo_aplicado - monto_contado) + anticipo_aplicado = total_original
-            # So the existing validation is correct in principle:
-            diferencia_total = abs(round(suma_componentes, 2) - round(submitted_total_original, 2))
+            # Validar contra el importe neto (total - descuento)
+            diferencia_total = abs(round(suma_componentes, 2) - round(submitted_importe_neto, 2))
 
-            # Final validations
+            # Validaciones finales
             if submitted_cantidad > current_existencia and current_existencia >= 0:
                 st.error(
-                    f"❌ No hay suficiente existencia de {submitted_producto}. Solo quedan {current_existencia} unidades.")
+                    f"❌ No hay suficiente existencia de {submitted_producto}. "
+                    f"Solo quedan {current_existencia} unidades."
+                )
             elif diferencia_total > epsilon:
                 st.error(
-                    "❌ El total ingresado (contado + crédito + anticipo) no coincide con el total de la venta original. "
-                    f"Desfase: {diferencia_total:.4f}"
+                    f"❌ La suma Contado + Crédito + Anticipo debe igualar el Importe Neto "
+                    f"(${submitted_importe_neto:.2f}). Desfase: {diferencia_total:.4f}"
                 )
             elif monto_credito_f > current_credito_disponible + epsilon:
                 st.error(
-                    f"❌ El crédito solicitado (${monto_credito_f:.2f}) excede el disponible (${current_credito_disponible:.2f}).")
+                    f"❌ El crédito solicitado (${monto_credito_f:.2f}) excede el disponible (${current_credito_disponible:.2f})."
+                )
             else:
-                # Determine Tipo de Venta correctly
-                tipo_venta = ""
+                # Determinar tipo de venta
                 if monto_credito_f > 0 and (submitted_monto_contado > 0 or anticipo_final_aplicado > 0):
                     tipo_venta = "Mixta"
                 elif monto_credito_f > 0 and submitted_monto_contado == 0 and anticipo_final_aplicado == 0:
@@ -365,10 +436,24 @@ def render():
                         "Fecha": submitted_fecha.isoformat(),
                         "Descripción": f"Anticipo aplicado a venta de {submitted_cliente}",
                         "Categoría": "Anticipo Aplicado",
-                        "Tipo": "Gasto",
+                        "Tipo": "Egreso",  # ✅ Cambio aquí
                         "Monto": float(anticipo_final_aplicado),
                         "Cliente": submitted_cliente,
                         "Método de pago": "Anticipo"
+                    })
+
+                epsilon = 0.01
+
+                # 📌 Venta a crédito pura (sin contado ni anticipo)
+                if monto_credito_f > epsilon and submitted_monto_contado <= epsilon and anticipo_final_aplicado <= epsilon:
+                    guardar_transaccion({
+                        "Fecha": submitted_fecha.isoformat(),
+                        "Descripción": f"Venta a crédito para {submitted_cliente}",
+                        "Categoría": "Ventas a Crédito",
+                        "Tipo": "Ingreso",
+                        "Monto": monto_credito_f,
+                        "Cliente": submitted_cliente,
+                        "Método de pago": "Crédito"
                     })
 
                 # --- DESCONTAR CANTIDAD DEL INVENTARIO ---
@@ -395,9 +480,11 @@ def render():
     # --- Date Range Selection for Export ---
     col1, col2 = st.columns(2)
     with col1:
-        start_date = st.date_input("Fecha de inicio", value=pd.to_datetime(st.session_state.ventas["Fecha"]).min() if not st.session_state.ventas.empty else None)
+        start_date = st.date_input("Fecha de inicio", value=pd.to_datetime(
+            st.session_state.ventas["Fecha"]).min() if not st.session_state.ventas.empty else None)
     with col2:
-        end_date = st.date_input("Fecha de fin", value=pd.to_datetime(st.session_state.ventas["Fecha"]).max() if not st.session_state.ventas.empty else None)
+        end_date = st.date_input("Fecha de fin", value=pd.to_datetime(
+            st.session_state.ventas["Fecha"]).max() if not st.session_state.ventas.empty else None)
 
     filtered_ventas_df = st.session_state.ventas.copy()
 
@@ -419,7 +506,6 @@ def render():
         )
     else:
         st.info("No hay datos de ventas para el rango de fechas seleccionado o en general.")
-
 
     if not st.session_state.ventas.empty:
         st.subheader("📊 Ingresos diarios")

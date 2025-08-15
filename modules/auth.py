@@ -1,8 +1,27 @@
 import streamlit as st
 import firebase_admin
 from firebase_admin import auth
+import pyrebase  # pip install pyrebase4
 import datetime
 
+# 🔹 Configuración de Firebase para cliente (Pyrebase)
+firebaseConfig = {
+    "apiKey": "AIzaSyBjoqv5IOZ4oo-bR9zbcx2QSkQecWXmsj4",
+    "authDomain": "minegocioprovd.firebaseapp.com",
+    "projectId": "minegocioprovd",
+    "storageBucket": "minegocioprovd.firebasestorage.app",
+    "messagingSenderId": "861161124605",
+    "appId": "1:861161124605:web:41f45388ba7722248d0494",
+    "databaseURL": ""
+}
+
+firebase = pyrebase.initialize_app(firebaseConfig)
+auth_client = firebase.auth()
+
+
+# ---------------------------
+# Registro de usuario
+# ---------------------------
 def registrar_usuario(correo, contrasena):
     try:
         user = auth.create_user(
@@ -13,29 +32,48 @@ def registrar_usuario(correo, contrasena):
     except Exception as e:
         st.error(f"❌ Error al registrar usuario: {e}")
 
+
+# ---------------------------
+# Inicio de sesión
+# ---------------------------
 def iniciar_sesion(correo, contrasena):
     try:
+        user = auth_client.sign_in_with_email_and_password(correo, contrasena)
+        st.session_state.uid = user["localId"]      # 👈 UID para particionar datos
         st.session_state.usuario = correo
         st.success("✅ Inicio de sesión exitoso")
-        st.success("Inicio de sesión exitoso. Redirigiendo...")
         st.rerun()
     except Exception as e:
         st.error(f"❌ Error al iniciar sesión: {e}")
 
-def cerrar_sesion():
-    if "usuario" in st.session_state:
-        del st.session_state.usuario
-        st.success("👋 Sesión cerrada exitosamente")
 
+
+# ---------------------------
+# Cerrar sesión
+# ---------------------------
+def cerrar_sesion():
+    for k in ["uid", "usuario"]:
+        if k in st.session_state:
+            del st.session_state[k]
+    st.success("👋 Sesión cerrada exitosamente")
+
+
+
+# ---------------------------
+# Recuperar contraseña
+# ---------------------------
 def recuperar_contrasena(correo):
     try:
-        link = auth.generate_password_reset_link(correo)
-        st.info(f"🔐 Enlace de recuperación enviado: {link}")
+        auth_client.send_password_reset_email(correo)
+        st.success(f"✅ Se envió un correo de recuperación a: {correo}")
     except Exception as e:
         st.error(f"❌ Error al enviar recuperación: {e}")
 
+
+# ---------------------------
+# Pantalla de login
+# ---------------------------
 def mostrar_login():
-    # 🔷 TÍTULO y SUBTÍTULO
     st.markdown("""
         <div style='text-align: center; margin-bottom: 2rem;'>
             <h1 style='color: #2C3E50;'>💼 MiNegocio Pro</h1>
@@ -63,8 +101,12 @@ def mostrar_login():
         if st.button("Enviar recuperación"):
             recuperar_contrasena(correo)
 
+
+# ---------------------------
+# Mostrar botón de logout
+# ---------------------------
 def mostrar_logout():
     if "usuario" in st.session_state:
-        st.sidebar.markdown(f"👤 Usuario: **{st.session_state.usuario}**")
+        st.sidebar.markdown(f"👤 Usuario: {st.session_state.usuario}")
         if st.sidebar.button("Cerrar sesión"):
             cerrar_sesion()

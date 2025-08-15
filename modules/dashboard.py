@@ -4,82 +4,100 @@ import plotly.express as px
 import io
 import datetime
 from PIL import Image
-from utils.db import leer_ventas, leer_transacciones, leer_clientes, leer_productos, calcular_balance_contable # Importar calcular_balance_contable
-
+from utils.db import leer_ventas, leer_transacciones, leer_clientes, leer_productos, calcular_balance_contable
 from dotenv import load_dotenv
-load_dotenv()  # <-- ¡Carga .env antes de importar módulos que dependen de variables de entorno!
+
+load_dotenv()
+
+# ---- Funciones cacheadas ----
+@st.cache_data(ttl=60)
+def get_ventas():
+    return pd.DataFrame(leer_ventas())
+
+@st.cache_data(ttl=60)
+def get_transacciones():
+    df = pd.DataFrame(leer_transacciones())
+    if "Monto" in df.columns:
+        df["Monto"] = pd.to_numeric(df["Monto"], errors="coerce").fillna(0.0)
+    return df
+
+@st.cache_data(ttl=60)
+def get_clientes():
+    return pd.DataFrame(leer_clientes())
+
+@st.cache_data(ttl=60)
+def get_productos():
+    return pd.DataFrame(leer_productos())
 
 def render():
+    # ✅ Verificar sesión antes de continuar
+    if "uid" not in st.session_state:
+        st.warning("⚠️ Debes iniciar sesión para ver el panel.")
+        st.stop()
+
     # 🧭 Cabecera tipo ERP con logo local
     col_logo, col_title = st.columns([1, 4])
     with col_logo:
-        # Asegúrate de que 'assets/logo.png' exista en tu proyecto
         try:
             logo = Image.open("assets/logo.png")
             st.image(logo, width=80)
         except FileNotFoundError:
-            st.warning("Logo no encontrado en 'assets/logo.png'. Asegúrate de que la ruta es correcta.")
-            st.image("https://via.placeholder.com/80", width=80) # Placeholder si no se encuentra el logo
+            st.warning("Logo no encontrado en 'assets/logo.png'.")
+            st.image("https://via.placeholder.com/80", width=80)
     with col_title:
         st.markdown("## MiNegocio Pro")
         st.caption("By Xibalbá Business Suite")
 
     st.markdown("### 📊 Panel financiero en tiempo real")
 
-    # 🔄 Cargar datos desde Firestore
-    # Siempre recargamos los datos para asegurar que el dashboard esté actualizado
-    # Esto también recargará los DataFrames de st.session_state automáticamente.
-    st.session_state.ventas = leer_ventas()
-    st.session_state.transacciones = leer_transacciones()
-    st.session_state.clientes = leer_clientes()
-    st.session_state.productos = leer_productos()
+    # 🔄 Cargar datos solo si no están o si hay reload
+    if "ventas" not in st.session_state or st.session_state.get("reload_ventas", False):
+        st.session_state.ventas = get_ventas()
+        st.session_state.reload_ventas = False
+
+    if "transacciones" not in st.session_state or st.session_state.get("reload_transacciones", False):
+        st.session_state.transacciones = get_transacciones()
+        st.session_state.reload_transacciones = False
+
+    if "clientes" not in st.session_state or st.session_state.get("reload_clientes", False):
+        st.session_state.clientes = get_clientes()
+        st.session_state.reload_clientes = False
+
+    if "productos" not in st.session_state or st.session_state.get("reload_productos", False):
+        st.session_state.productos = get_productos()
+        st.session_state.reload_productos = False
 
     ventas_df = st.session_state.ventas
     transacciones_df = st.session_state.transacciones
     clientes_df = st.session_state.clientes
     productos_df = st.session_state.productos
 
-    # ✅ Asegurar que 'Monto' en transacciones_df sea numérico
-    if "Monto" not in transacciones_df.columns:
-        transacciones_df["Monto"] = 0.0 # Asegurar que sea float
-    else:
-        transacciones_df["Monto"] = pd.to_numeric(transacciones_df["Monto"], errors="coerce").fillna(0.0)
-
-    # ✅ Asegurar que 'Total' en ventas_df sea numérico
+    # ✅ Asegurar numéricos
     if "Total" not in ventas_df.columns:
         ventas_df["Total"] = 0.0
     else:
         ventas_df["Total"] = pd.to_numeric(ventas_df["Total"], errors="coerce").fillna(0.0)
 
     # 🚀 Cálculo de Ingresos y Egresos
-    # Usaremos la función calcular_balance_contable de utils.db para consistencia
     ingresos_totales, egresos_totales, balance_neto = calcular_balance_contable()
 
-    # Los "ingresos del mes" y "gastos del mes" en las métricas pueden ser filtrados por fecha si quieres.
-    # Por ahora, usaré los totales anuales de calcular_balance_contable para estas métricas,
-    # que es lo que la función ya proporciona (suma de todos los tiempos).
-    # Si quisieras "del mes", necesitarías filtrar por fecha actual en las funciones leer_X o aquí.
-
     col1, col2, col3 = st.columns(3)
-    col1.metric("Ingresos Totales", f"${ingresos_totales:,.0f}") # Ajustado a "Totales"
-    col2.metric("Egresos Totales", f"${egresos_totales:,.0f}") # ¡CAMBIO CLAVE AQUÍ: 'Egresos' en lugar de 'Gastos'
+    col1.metric("Ingresos Totales", f"${ingresos_totales:,.0f}")
+    col2.metric("Egresos Totales", f"${egresos_totales:,.0f}")
     col3.metric("Balance Neto", f"${balance_neto:,.0f}")
 
     st.divider()
     st.markdown("### 📈 Composición financiera")
-    # Para el gráfico de barras, usamos los mismos valores
     df_bar = pd.DataFrame({
-        "Categoría": ["Ingresos", "Egresos", "Balance Neto"], # ¡CAMBIO CLAVE AQUÍ: 'Egresos'
+        "Categoría": ["Ingresos", "Egresos", "Balance Neto"],
         "Monto": [ingresos_totales, egresos_totales, balance_neto]
     })
     st.plotly_chart(px.bar(df_bar, x="Categoría", y="Monto", color="Categoría",
                            template="plotly_white", title="Distribución por tipo"),
                     use_container_width=True)
 
-
     st.divider()
     st.markdown("### 📑 Desglose por tipo y categoría")
-
     if not transacciones_df.empty and "Categoría" in transacciones_df.columns:
         resumen_tipo_categoria = (
             transacciones_df
@@ -88,11 +106,7 @@ def render():
             .reset_index()
             .sort_values(by="Monto", ascending=False)
         )
-
-        # 📋 Mostrar tabla
         st.dataframe(resumen_tipo_categoria, use_container_width=True)
-
-        # 📊 Gráfico de barras
         fig_tc = px.bar(
             resumen_tipo_categoria,
             x="Monto",
@@ -117,11 +131,8 @@ def render():
     with col5:
         st.write("#### Flujo de ventas por día")
         if not ventas_df.empty and "Fecha" in ventas_df.columns:
-            # Convertir la columna Fecha a datetime para asegurar un orden correcto
             ventas_df['Fecha'] = pd.to_datetime(ventas_df['Fecha'])
-            flujo = ventas_df.groupby("Fecha")["Total"].sum().reset_index()
-            # Ordenar por fecha para el gráfico de línea
-            flujo = flujo.sort_values(by="Fecha")
+            flujo = ventas_df.groupby("Fecha")["Total"].sum().reset_index().sort_values(by="Fecha")
             st.plotly_chart(px.line(flujo, x="Fecha", y="Total", markers=True,
                                     template="plotly_white", title="Ingresos diarios por ventas"),
                             use_container_width=True)
@@ -161,19 +172,16 @@ def render():
 
     st.divider()
     st.subheader("📤 Exportar resumen")
-
     resumen_para_exportar = {
         "Resumen Financiero": df_bar,
         "Ventas por Cliente": resumen_clientes,
         "Productos Mas Vendidos": resumen_productos,
         "Margen por Producto": margen_df
     }
-
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         for nombre, df in resumen_para_exportar.items():
             if not df.empty:
-                # Asegurarse de que el nombre de la hoja no exceda 31 caracteres
                 sheet_name = nombre.replace(" ", "_")[:31]
                 df.to_excel(writer, sheet_name=sheet_name, index=False)
     output.seek(0)
@@ -186,7 +194,6 @@ def render():
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    # 🎨 Estilo visual
     st.markdown("""
         <style>
         .block-container { padding: 2rem; }

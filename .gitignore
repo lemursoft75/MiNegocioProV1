@@ -1,2 +1,63 @@
+# =====================
+# Archivos sensibles
+# =====================
 .env
+secrets.toml
+*serviceAccountKey.json
 utils/serviceAccountKey.json
+
+# =====================
+# Entornos virtuales
+# =====================
+.venv/
+venv/
+env/
+ENV/
+
+# =====================
+# Python cache & logs
+# =====================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.sqlite3
+*.db
+
+# =====================
+# Configuración de IDEs
+# =====================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# =====================
+# Archivos de sistema
+# =====================
+.DS_Store
+Thumbs.db
+
+# =====================
+# Archivos temporales
+# =====================
+*.tmp
+*.temp
+*.bak
+
+# =====================
+# Streamlit
+# =====================
+.streamlit/secrets.toml
+
+# =====================
+# Salidas de pruebas o datos
+# =====================
+*.csv
+*.xlsx
+*.xls
+*.parquet
+*.feather
+*.pickle
+*.pkl
