@@ -65,7 +65,7 @@ def _ref_write(col):
 
 
 # ---------- Lectura base cacheada (UNE user + root) ----------
-@st.cache_data(ttl=60, max_entries=100)
+# @st.cache_data(ttl=60, max_entries=100)
 def _cached_read_union(col: str, columnas: list, uid: str | None):
     """
     Une datos de usuarios/{uid}/{col} + {col} en raíz.
@@ -224,9 +224,9 @@ def leer_productos():
 
 def leer_ventas():
     columnas = [
-        "Fecha", "Cliente", "Producto", "Cantidad", "Precio Unitario", "Total",
-        "Descuento", "Importe Neto", "Monto Crédito", "Monto Contado",
-        "Anticipo Aplicado", "Método de pago", "Tipo de venta"
+        "Fecha", "Cliente", "Producto", "Clave del Producto",  # <-- ¡Aquí está el cambio!
+        "Cantidad", "Precio Unitario", "Total", "Descuento", "Importe Neto",
+        "Monto Crédito", "Monto Contado", "Anticipo Aplicado", "Método de pago", "Tipo de venta"
     ]
     uid = _uid()
     df = _cached_read_union("ventas", columnas, uid)

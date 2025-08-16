@@ -315,6 +315,9 @@ def render():
             current_producto_info = st.session_state.productos[
                 st.session_state.productos["Nombre"] == submitted_producto]
 
+            # Obtiene la 'Clave' del producto seleccionado
+            clave_producto = current_producto_info["Clave"].values[0] if not current_producto_info.empty else "N/A"
+
             current_existencia = 0
             if not current_producto_info.empty and "Cantidad" in current_producto_info.columns:
                 current_existencia = int(current_producto_info["Cantidad"].values[0])
@@ -418,10 +421,12 @@ def render():
                 else:
                     tipo_venta = "Indefinido"
 
+
                 venta_dict = {
                     "Fecha": submitted_fecha.isoformat(),
                     "Cliente": submitted_cliente,
                     "Producto": submitted_producto,
+                    "Clave del Producto": clave_producto,  # <-- Agregamos la clave aquí
                     "Cantidad": float(submitted_cantidad),
                     "Precio Unitario": float(submitted_precio),
                     "Total": submitted_total_original,
@@ -437,6 +442,7 @@ def render():
                     ),
                     "Tipo de venta": tipo_venta
                 }
+                guardar_venta(venta_dict)
                 guardar_venta(venta_dict)
 
                 if submitted_monto_contado > 0:
