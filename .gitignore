@@ -50,14 +50,3 @@ Thumbs.db
 # Streamlit
 # =====================
 .streamlit/secrets.toml
-
-# =====================
-# Salidas de pruebas o datos
-# =====================
-*.csv
-*.xlsx
-*.xls
-*.parquet
-*.feather
-*.pickle
-*.pkl

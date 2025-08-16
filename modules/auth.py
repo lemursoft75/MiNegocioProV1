@@ -5,16 +5,8 @@ import pyrebase  # pip install pyrebase4
 import datetime
 
 # 🔹 Configuración de Firebase para cliente (Pyrebase)
-firebaseConfig = {
-    "apiKey": "AIzaSyBjoqv5IOZ4oo-bR9zbcx2QSkQecWXmsj4",
-    "authDomain": "minegocioprovd.firebaseapp.com",
-    "projectId": "minegocioprovd",
-    "storageBucket": "minegocioprovd.firebasestorage.app",
-    "messagingSenderId": "861161124605",
-    "appId": "1:861161124605:web:41f45388ba7722248d0494",
-    "databaseURL": ""
-}
 
+firebaseConfig = dict(st.secrets["firebase_client"])
 firebase = pyrebase.initialize_app(firebaseConfig)
 auth_client = firebase.auth()
 

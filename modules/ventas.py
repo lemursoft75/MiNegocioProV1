@@ -125,16 +125,35 @@ def render():
     fecha = st.date_input("Fecha", key="venta_fecha")
     cliente = st.selectbox("Cliente", st.session_state.clientes["Nombre"].tolist(), key="venta_cliente")
 
-    # --- CAMBIOS AQUÍ para mostrar la existencia ---
-    producto = st.selectbox("Producto/Servicio", st.session_state.productos["Nombre"].tolist(), key="venta_producto")
 
+    # --- CAMBIOS AQUÍ para mostrar la existencia con selección extendida ---
+    df_productos = st.session_state.productos.copy()
+
+    # Crear columna combinada para mostrar en el selectbox
+    df_productos["Etiqueta"] = df_productos.apply(
+        lambda row: f"{row['Nombre']} | {row['Clave']} | {row['Marca_Tipo']}", axis=1
+    )
+
+    # Mostrar el selectbox con la etiqueta combinada
+    producto_seleccionado = st.selectbox(
+        "Producto/Servicio",
+        df_productos["Etiqueta"].tolist(),
+        key="venta_producto"
+    )
+
+    # Inicializar valores
     existencia_actual = 0
-    producto_info_selected = pd.DataFrame()  # Inicializar como DataFrame vacío
-    if producto and not st.session_state.productos.empty:
-        producto_info_selected = st.session_state.productos[st.session_state.productos["Nombre"] == producto]
+    producto_info_selected = pd.DataFrame()
+
+    # Buscar el producto original por la etiqueta seleccionada
+    if producto_seleccionado and not df_productos.empty:
+        producto_info_selected = df_productos[df_productos["Etiqueta"] == producto_seleccionado]
         if not producto_info_selected.empty and "Cantidad" in producto_info_selected.columns:
             existencia_actual = int(producto_info_selected["Cantidad"].values[0])
         st.info(f"📦 Existencia actual: **{existencia_actual}** unidades.")
+
+    # Extraer el nombre real del producto para el formulario
+    producto = producto_info_selected["Nombre"].values[0] if not producto_info_selected.empty else ""
     # --- FIN CAMBIOS para mostrar la existencia ---
 
     cantidad = st.number_input("Cantidad", min_value=1, key="venta_cantidad")
