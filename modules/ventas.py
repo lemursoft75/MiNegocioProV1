@@ -443,7 +443,7 @@ def render():
                     "Tipo de venta": tipo_venta
                 }
                 guardar_venta(venta_dict)
-                guardar_venta(venta_dict)
+
 
                 if submitted_monto_contado > 0:
                     guardar_transaccion({
