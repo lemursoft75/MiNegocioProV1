@@ -129,31 +129,32 @@ def render():
     # --- CAMBIOS AQUÍ para mostrar la existencia con selección extendida ---
     df_productos = st.session_state.productos.copy()
 
-    # Crear columna combinada para mostrar en el selectbox
+    # --- Crear columna combinada para mostrar en el selectbox ---
+    df_productos = st.session_state.productos.copy()
+
     df_productos["Etiqueta"] = df_productos.apply(
         lambda row: f"{row['Nombre']} | {row['Clave']} | {row['Marca_Tipo']}", axis=1
     )
 
-    # Mostrar el selectbox con la etiqueta combinada
-    producto_seleccionado = st.selectbox(
+    # Usar índice como clave para el selectbox (no la etiqueta sola)
+    producto_idx = st.selectbox(
         "Producto/Servicio",
-        df_productos["Etiqueta"].tolist(),
+        df_productos.index,  # el selectbox trabaja con índices reales
+        format_func=lambda i: df_productos.loc[i, "Etiqueta"],
         key="venta_producto"
     )
 
-    # Inicializar valores
-    existencia_actual = 0
-    producto_info_selected = pd.DataFrame()
+    # Ahora siempre tienes acceso directo a la fila original
+    producto_info_selected = df_productos.loc[[producto_idx]]
 
-    # Buscar el producto original por la etiqueta seleccionada
-    if producto_seleccionado and not df_productos.empty:
-        producto_info_selected = df_productos[df_productos["Etiqueta"] == producto_seleccionado]
-        if not producto_info_selected.empty and "Cantidad" in producto_info_selected.columns:
-            existencia_actual = int(producto_info_selected["Cantidad"].values[0])
-        st.info(f"📦 Existencia actual: **{existencia_actual}** unidades.")
+    # Usa el campo correcto de inventario
+    col_existencia = "existencia" if "existencia" in producto_info_selected.columns else "Cantidad"
+    existencia_actual = int(producto_info_selected[col_existencia].values[0])
 
-    # Extraer el nombre real del producto para el formulario
-    producto = producto_info_selected["Nombre"].values[0] if not producto_info_selected.empty else ""
+    st.info(f"📦 Existencia actual: *{existencia_actual}* unidades.")
+
+    # Nombre real para el registro
+    producto = producto_info_selected["Nombre"].values[0]
     # --- FIN CAMBIOS para mostrar la existencia ---
 
     cantidad = st.number_input("Cantidad", min_value=1, key="venta_cantidad")
@@ -251,13 +252,11 @@ def render():
             st.warning("⚠️ El límite de crédito del cliente no es válido. Se asignará 0.")
             limite_credito = 0.0
 
-        # Filtrar pagos de cobranza para el cliente (para crédito)
-        pagos = st.session_state.transacciones_data[  # Usar session_state.transacciones_data
-            (st.session_state.transacciones_data["Categoría"] == "Cobranza") & (
-                    st.session_state.transacciones_data["Cliente"] == cliente)
+        pagos = st.session_state.transacciones_data[
+            (st.session_state.transacciones_data["Categoría"] == "Cobranza") &
+            (st.session_state.transacciones_data["Cliente"] == cliente)
             ]
-        pagos_realizados = pagos["Monto"].sum() if not pagos.empty else 0.0
-        pagos_realizados = float(pagos_realizados)
+        pagos_realizados = float(pagos["Monto"].sum()) if not pagos.empty else 0.0
 
         ventas_cliente = st.session_state.ventas[st.session_state.ventas["Cliente"] == cliente]
 
@@ -271,39 +270,51 @@ def render():
         credito_usado = float(total_credito_otorgado) - float(pagos_realizados)
         credito_disponible = float(limite_credito) - float(credito_usado)
 
-        st.markdown(f"💳 **Crédito autorizado:** ${limite_credito:.2f}")
-        st.markdown(f"🔸 **Crédito usado:** ${credito_usado:.2f}")
-        st.markdown(f"🟢 **Disponible para crédito:** ${credito_disponible:.2f}")
+        st.markdown(f"💳 *Crédito autorizado:* ${limite_credito:.2f}")
+        st.markdown(f"🔸 *Crédito usado:* ${credito_usado:.2f}")
+        st.markdown(f"🟢 *Disponible para crédito:* ${credito_disponible:.2f}")
 
-        # Monto contado y método de pago
-        # The max_value must be the total adjusted, not the original total
-        monto_contado = st.number_input("💵 Monto pagado al contado", min_value=0.0,
-                                        max_value=float(total_ajustado_ui_display),
-                                        step=0.01, key="venta_monto_contado_final")
+        monto_contado = st.number_input(
+            "💵 Monto pagado al contado",
+            min_value=0.0,
+            max_value=float(total_ajustado_ui_display),
+            step=0.01,
+            key="venta_monto_contado_final"
+        )
         metodo_pago = st.selectbox("Método de pago (contado)", ["Efectivo", "Transferencia", "Tarjeta"],
                                    key="venta_metodo_pago_final")
 
-        monto_credito = total_ajustado_ui_display - monto_contado  # Calculate based on the adjusted total for UI
-        st.markdown(f"**🧾 Crédito solicitado:** ${monto_credito:.2f}")
+        monto_credito = total_ajustado_ui_display - monto_contado
+        st.markdown(f"*🧾 Crédito solicitado:* ${monto_credito:.2f}")
 
+        # === Guardar la clave del producto seleccionado en session_state ===
+        if not producto_info_selected.empty and "Clave" in producto_info_selected.columns:
+            clave_producto_sel = str(producto_info_selected["Clave"].values[0])
+            st.session_state["venta_producto_clave"] = clave_producto_sel
+        else:
+            st.session_state["venta_producto_clave"] = None
+
+        # --- BOTÓN SUBMIT ---
         submitted = st.form_submit_button("Registrar venta")
 
         if submitted:
-            # --- RECARGAR DATOS FRESCOS JUSTO ANTES DE PROCESAR ---
+            # --- Recargar datos frescos ---
             st.session_state.ventas = leer_ventas()
             for col in numeric_cols_ventas:
                 if col in st.session_state.ventas.columns:
-                    st.session_state.ventas[col] = pd.to_numeric(st.session_state.ventas[col], errors='coerce').fillna(
-                        0.0)
+                    st.session_state.ventas[col] = pd.to_numeric(
+                        st.session_state.ventas[col], errors='coerce'
+                    ).fillna(0.0)
 
             st.session_state.transacciones_data = leer_transacciones()
             if "Monto" in st.session_state.transacciones_data.columns:
                 st.session_state.transacciones_data["Monto"] = pd.to_numeric(
-                    st.session_state.transacciones_data["Monto"],
-                    errors='coerce').fillna(0.0)
-            st.session_state.productos = leer_productos()  # Recargar productos para existencia y precio
+                    st.session_state.transacciones_data["Monto"], errors='coerce'
+                ).fillna(0.0)
 
-            # --- OBTENER VALORES ACTUALES DE LOS INPUTS DEL FORMULARIO ---
+            st.session_state.productos = leer_productos()
+
+            # --- Inputs del form ---
             submitted_fecha = fecha
             submitted_cliente = cliente
             submitted_producto = producto
@@ -311,105 +322,77 @@ def render():
             submitted_monto_contado = monto_contado
             submitted_metodo_pago = metodo_pago
 
-            # --- RECALCULAR PRECIO Y EXISTENCIA AL MOMENTO DEL SUBMIT CON DATOS FRESCOS ---
-            current_producto_info = st.session_state.productos[
-                st.session_state.productos["Nombre"] == submitted_producto]
-
-            # Obtiene la 'Clave' del producto seleccionado
-            clave_producto = current_producto_info["Clave"].values[0] if not current_producto_info.empty else "N/A"
-
-            current_existencia = 0
-            if not current_producto_info.empty and "Cantidad" in current_producto_info.columns:
-                current_existencia = int(current_producto_info["Cantidad"].values[0])
-
-            submitted_precio = 0.0
-            if not current_producto_info.empty and "Precio Unitario" in current_producto_info.columns:
-                submitted_precio = float(current_producto_info["Precio Unitario"].values[0])
-
-            # --- RECALCULAR TOTALES Y COMPONENTES CON LOS VALORES DEL SUBMIT ---
+            submitted_precio = float(producto_info_selected["Precio Unitario"].values[0])
             submitted_total_original = submitted_cantidad * submitted_precio
             submitted_descuento = st.session_state.get("venta_descuento", 0.0)
-            submitted_importe_neto = submitted_total_original - submitted_descuento
-            if submitted_importe_neto < 0:
-                submitted_importe_neto = 0.0
-
-            # This is the crucial part: Use the *explicitly entered* anticipo value
-            anticipo_final_aplicado = st.session_state.get("input_anticipo_visible", 0.0)
-
+            submitted_importe_neto = max(0.0, submitted_total_original - submitted_descuento)
+            anticipo_final_aplicado = max(0.0, st.session_state.get("input_anticipo_visible", 0.0))
             submitted_total_ajustado = submitted_importe_neto - anticipo_final_aplicado
 
-            # The monto_credito_f MUST be the difference between the adjusted total and the submitted cash amount
-            monto_credito_f = submitted_total_ajustado - submitted_monto_contado
-
-            # Ensure amounts are not negative due to floating point inaccuracies
-            monto_credito_f = max(0.0, monto_credito_f)
+            monto_credito_f = max(0.0, submitted_total_ajustado - submitted_monto_contado)
             submitted_monto_contado = max(0.0, submitted_monto_contado)
-            anticipo_final_aplicado = max(0.0, anticipo_final_aplicado)
 
-            # --- RECALCULAR CRÉDITO DISPONIBLE AL MOMENTO DEL SUBMIT CON DATOS FRESCOS ---
-            current_cliente_info = \
-                st.session_state.clientes[st.session_state.clientes["Nombre"] == submitted_cliente].iloc[0]
+            # --- Recalcular crédito ---
+            current_cliente_info = st.session_state.clientes[
+                st.session_state.clientes["Nombre"] == submitted_cliente
+                ].iloc[0]
             current_limite_credito = float(current_cliente_info.get("Límite de crédito", 0.0))
 
             current_pagos = st.session_state.transacciones_data[
-                (st.session_state.transacciones_data["Categoría"] == "Cobranza") & (
-                        st.session_state.transacciones_data["Cliente"] == submitted_cliente)
+                (st.session_state.transacciones_data["Categoría"] == "Cobranza") &
+                (st.session_state.transacciones_data["Cliente"] == submitted_cliente)
                 ]
             current_pagos_realizados = current_pagos["Monto"].sum() if not current_pagos.empty else 0.0
 
-            current_ventas_cliente = st.session_state.ventas[st.session_state.ventas["Cliente"] == submitted_cliente]
+            current_ventas_cliente = st.session_state.ventas[
+                st.session_state.ventas["Cliente"] == submitted_cliente
+                ]
             current_total_credito_otorgado = 0.0
             if "Tipo de venta" in current_ventas_cliente.columns and "Monto Crédito" in current_ventas_cliente.columns:
-                current_credito_otorgado_series = current_ventas_cliente[
+                series_credito = current_ventas_cliente[
                     current_ventas_cliente["Tipo de venta"].isin(["Crédito", "Mixta"])
                 ]["Monto Crédito"]
-                current_total_credito_otorgado = float(
-                    current_credito_otorgado_series.sum()) if not current_credito_otorgado_series.empty else 0.0
+                current_total_credito_otorgado = float(series_credito.sum()) if not series_credito.empty else 0.0
 
-            current_credito_usado = float(current_total_credito_otorgado) - float(current_pagos_realizados)
-            current_credito_disponible = float(current_limite_credito) - float(current_credito_usado)
+            current_credito_usado = current_total_credito_otorgado - current_pagos_realizados
+            current_credito_disponible = current_limite_credito - current_credito_usado
 
-            # --- DEBUG: Mostrar valores clave al momento del SUBMIT ---
-            # st.subheader("DEBUG: Valores al momento del Submit")
-            # st.write(f"submitted_fecha: {submitted_fecha}")
-            # st.write(f"submitted_cliente: {submitted_cliente}")
-            # st.write(f"submitted_producto: {submitted_producto}")
-            # st.write(f"submitted_cantidad: {submitted_cantidad}")
-            # st.write(f"submitted_precio (recalculado): {submitted_precio}")
-            # st.write(f"submitted_total_original (recalculado): {submitted_total_original}")
-            # st.write(f"anticipo_final_aplicado (del session_state): {anticipo_final_aplicado}")
-            # st.write(f"submitted_total_ajustado (recalculado): {submitted_total_ajustado}")
-            # st.write(f"submitted_monto_contado (del form): {submitted_monto_contado}")
-            # st.write(f"monto_credito_f (recalculado): {monto_credito_f}")
-            # st.write(f"current_existencia: {current_existencia}")
-            # st.write(f"current_credito_disponible: {current_credito_disponible}")
-            # --- FIN DEBUG ---
+            # --- Obtener producto por clave ---
+            clave_producto = st.session_state.get("venta_producto_clave", None)
+            if not clave_producto:
+                st.error("❌ No se pudo identificar el producto seleccionado. Vuelve a elegirlo en el formulario.")
+                st.stop()
 
+            df_prod = st.session_state.productos.copy()
+            df_prod["Clave"] = df_prod["Clave"].astype(str)
+            clave_producto = str(clave_producto)
+
+            current_producto_info = df_prod[df_prod["Clave"] == clave_producto]
+            if current_producto_info.empty:
+                st.error("❌ El producto con clave seleccionada no existe en el catálogo.")
+                st.stop()
+
+            col_existencia = "existencia" if "existencia" in current_producto_info.columns else "Cantidad"
+            current_existencia = int(
+                pd.to_numeric(current_producto_info[col_existencia], errors="coerce").fillna(0).iloc[0]
+            )
+
+            # --- Validaciones ---
             suma_componentes = submitted_monto_contado + monto_credito_f + anticipo_final_aplicado
-
-            # Tolerancia para comparación de punto flotante
             epsilon = 0.01
-
-            # Validar contra el importe neto (total - descuento)
             diferencia_total = abs(round(suma_componentes, 2) - round(submitted_importe_neto, 2))
 
-            # Validaciones finales
             if submitted_cantidad > current_existencia and current_existencia >= 0:
-                st.error(
-                    f"❌ No hay suficiente existencia de {submitted_producto}. "
-                    f"Solo quedan {current_existencia} unidades."
-                )
+                st.error(f"❌ No hay suficiente existencia de {submitted_producto}. "
+                         f"Solo quedan {current_existencia} unidades.")
             elif diferencia_total > epsilon:
-                st.error(
-                    f"❌ La suma Contado + Crédito + Anticipo debe igualar el Importe Neto "
-                    f"(${submitted_importe_neto:.2f}). Desfase: {diferencia_total:.4f}"
-                )
+                st.error(f"❌ La suma Contado + Crédito + Anticipo debe igualar el Importe Neto "
+                         f"(${submitted_importe_neto:.2f}). Desfase: {diferencia_total:.4f}")
             elif monto_credito_f > current_credito_disponible + epsilon:
-                st.error(
-                    f"❌ El crédito solicitado (${monto_credito_f:.2f}) excede el disponible (${current_credito_disponible:.2f})."
-                )
+                st.error(f"❌ El crédito solicitado (${monto_credito_f:.2f}) excede el disponible "
+                         f"(${current_credito_disponible:.2f}).")
             else:
-                # Determinar tipo de venta
+                # --- Tipo de venta ---
                 if monto_credito_f > 0 and (submitted_monto_contado > 0 or anticipo_final_aplicado > 0):
                     tipo_venta = "Mixta"
                 elif monto_credito_f > 0 and submitted_monto_contado == 0 and anticipo_final_aplicado == 0:
@@ -421,12 +404,12 @@ def render():
                 else:
                     tipo_venta = "Indefinido"
 
-
+                # --- Guardar venta ---
                 venta_dict = {
                     "Fecha": submitted_fecha.isoformat(),
                     "Cliente": submitted_cliente,
                     "Producto": submitted_producto,
-                    "Clave del Producto": clave_producto,  # <-- Agregamos la clave aquí
+                    "Clave del Producto": clave_producto,
                     "Cantidad": float(submitted_cantidad),
                     "Precio Unitario": float(submitted_precio),
                     "Total": submitted_total_original,
@@ -444,7 +427,7 @@ def render():
                 }
                 guardar_venta(venta_dict)
 
-
+                # --- Transacciones ---
                 if submitted_monto_contado > 0:
                     guardar_transaccion({
                         "Fecha": submitted_fecha.isoformat(),
@@ -461,15 +444,12 @@ def render():
                         "Fecha": submitted_fecha.isoformat(),
                         "Descripción": f"Anticipo aplicado a venta de {submitted_cliente}",
                         "Categoría": "Anticipo Aplicado",
-                        "Tipo": "Egreso",  # ✅ Cambio aquí
+                        "Tipo": "Egreso",
                         "Monto": float(anticipo_final_aplicado),
                         "Cliente": submitted_cliente,
                         "Método de pago": "Anticipo"
                     })
 
-                epsilon = 0.01
-
-                # 📌 Venta a crédito pura (sin contado ni anticipo)
                 if monto_credito_f > epsilon and submitted_monto_contado <= epsilon and anticipo_final_aplicado <= epsilon:
                     guardar_transaccion({
                         "Fecha": submitted_fecha.isoformat(),
@@ -481,19 +461,14 @@ def render():
                         "Método de pago": "Crédito"
                     })
 
-                # --- DESCONTAR CANTIDAD DEL INVENTARIO ---
-                producto_clave = st.session_state.productos.loc[
-                    st.session_state.productos["Nombre"] == submitted_producto, "Clave"].iloc[0]
+                # --- Descontar inventario ---
                 nueva_cantidad_inventario = current_existencia - submitted_cantidad
-                actualizar_producto_por_clave(producto_clave, {"Cantidad": nueva_cantidad_inventario})
-                # --- FIN DESCUENTO INVENTARIO ---
+                actualizar_producto_por_clave(clave_producto, {col_existencia: nueva_cantidad_inventario})
 
-                # Update session state after successful operation
+                # --- Refrescar estado ---
                 st.session_state.ventas = leer_ventas()
                 st.session_state.transacciones_data = leer_transacciones()
                 st.session_state.productos = leer_productos()
-
-                # Crucial for the next sale: Reset the anticipo input to 0 after a successful sale
                 st.session_state["input_anticipo_visible"] = 0.0
 
                 st.success("✅ Venta registrada correctamente")

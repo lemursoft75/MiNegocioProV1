@@ -2,7 +2,6 @@
 import os
 import json
 import base64
-import datetime
 import logging
 import pandas as pd
 import streamlit as st
@@ -53,53 +52,43 @@ def _ref_user(col):
     return db.collection("usuarios").document(uid).collection(col)
 
 
-def _ref_root(col):
-    return db.collection(col)
-
-
 def _ref_write(col):
-    """Para ESCRIBIR: usa espacio usuario si hay uid; si no, raíz (para pruebas)."""
+    """Siempre escribe bajo el usuario actual."""
     inicializar_firebase()
     ref = _ref_user(col)
-    return ref if ref is not None else _ref_root(col)
+    if ref is None:
+        raise RuntimeError("⚠️ No hay UID en sesión, no se puede escribir.")
+    return ref
 
 
-# ---------- Lectura base cacheada (UNE user + root) ----------
-# @st.cache_data(ttl=60, max_entries=100)
+# ---------- Lectura base cacheada (solo user) ----------
 def _cached_read_union(col: str, columnas: list, uid: str | None):
     """
-    Une datos de usuarios/{uid}/{col} + {col} en raíz.
-    Si hay duplicados (p.ej. misma 'Clave'), se respeta primero lo del usuario.
+    Lee solo datos del usuario actual (usuarios/{uid}/{col}).
     """
     inicializar_firebase()
 
-    # 1) Usuario
-    df_user = pd.DataFrame(columns=columnas)
-    if uid:
-        ref_user = db.collection("usuarios").document(uid).collection(col)
-        docs_user = list(ref_user.stream())
-        if docs_user:
-            df_user = pd.DataFrame([{c: d.to_dict().get(c, None) for c in columnas} for d in docs_user])
+    if not uid:
+        return pd.DataFrame(columns=columnas)
 
-    # 2) Raíz
-    ref_root = _ref_root(col)
-    docs_root = list(ref_root.stream())
-    df_root = pd.DataFrame([{c: d.to_dict().get(c, None) for c in columnas} for d in docs_root]) if docs_root else pd.DataFrame(columns=columnas)
+    ref_user = db.collection("usuarios").document(uid).collection(col)
+    docs_user = list(ref_user.stream())
 
-    # 3) Unir: primero user (para que conserve prioridad), luego root
-    df = pd.concat([df_user, df_root], ignore_index=True)
+    if not docs_user:
+        return pd.DataFrame(columns=columnas)
+
+    df_user = pd.DataFrame([{c: d.to_dict().get(c, None) for c in columnas} for d in docs_user])
 
     # Asegurar columnas
     for c in columnas:
-        if c not in df.columns:
-            df[c] = None
+        if c not in df_user.columns:
+            df_user[c] = None
 
-    # Si existe 'Clave', deduplicar por Clave conservando la 1ª ocurrencia (usuario)
-    if "Clave" in columnas and "Clave" in df.columns:
-        df = df.drop_duplicates(subset=["Clave"], keep="first")
+    # Deduplicar por Clave si aplica
+    if "Clave" in columnas and "Clave" in df_user.columns:
+        df_user = df_user.drop_duplicates(subset=["Clave"], keep="first")
 
-    return df[columnas]
-
+    return df_user[columnas]
 
 
 def _clear_cache():
@@ -111,10 +100,24 @@ def _clear_cache():
 # Ventas
 # ---------------------------
 def guardar_venta(venta_dict):
-    ref = _ref_write("ventas")
-    ref.add(venta_dict)
+    _ref_write("ventas").add(venta_dict)
     logging.info("Venta guardada.")
     _clear_cache()
+
+
+def leer_ventas():
+    columnas = [
+        "Fecha", "Cliente", "Producto", "Clave del Producto",
+        "Cantidad", "Precio Unitario", "Total", "Descuento", "Importe Neto",
+        "Monto Crédito", "Monto Contado", "Anticipo Aplicado",
+        "Método de pago", "Tipo de venta"
+    ]
+    uid = _uid()
+    df = _cached_read_union("ventas", columnas, uid)
+    for col in ["Cantidad", "Precio Unitario", "Total", "Descuento", "Importe Neto",
+                "Monto Crédito", "Monto Contado", "Anticipo Aplicado"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+    return df
 
 
 # ---------------------------
@@ -130,6 +133,30 @@ def actualizar_cliente(id_cliente, datos_nuevos):
     _ref_write("clientes").document(id_cliente).update(datos_nuevos)
     logging.info(f"Cliente '{id_cliente}' actualizado.")
     _clear_cache()
+
+
+def leer_clientes():
+    columnas = ["ID", "Nombre", "Correo", "Teléfono", "Empresa", "RFC", "Límite de crédito"]
+    inicializar_firebase()
+    uid = _uid()
+    if not uid:
+        return pd.DataFrame(columns=columnas)
+
+    ref = db.collection("usuarios").document(uid).collection("clientes")
+    docs = list(ref.stream())
+    if not docs:
+        return pd.DataFrame(columns=columnas)
+
+    filas = []
+    for d in docs:
+        data = d.to_dict() or {}
+        data["ID"] = d.id
+        filas.append({c: data.get(c, None) for c in columnas})
+    df = pd.DataFrame(filas)
+
+    if "Límite de crédito" in df.columns:
+        df["Límite de crédito"] = pd.to_numeric(df["Límite de crédito"], errors="coerce").fillna(0.0)
+    return df[columnas]
 
 
 # ---------------------------
@@ -156,6 +183,26 @@ def registrar_pago_cobranza(cliente, monto, metodo_pago, fecha, descripcion=""):
     _clear_cache()
 
 
+def leer_transacciones():
+    columnas = ["Fecha", "Descripción", "Categoría", "Tipo", "Monto", "Cliente", "Método de pago"]
+    uid = _uid()
+    df = _cached_read_union("transacciones", columnas, uid)
+    df["Monto"] = pd.to_numeric(df["Monto"], errors="coerce").fillna(0.0)
+    return df
+
+
+def leer_cobranza():
+    df = leer_transacciones()
+    return df[df["Categoría"] == "Cobranza"]
+
+
+def calcular_balance_contable():
+    df = leer_transacciones()
+    ingresos = df[df["Tipo"] == "Ingreso"]["Monto"].sum()
+    egresos = df[df["Tipo"] == "Egreso"]["Monto"].sum()
+    return ingresos, egresos, ingresos - egresos
+
+
 # ---------------------------
 # Productos
 # ---------------------------
@@ -172,23 +219,14 @@ def actualizar_producto_por_clave(clave, campos_actualizados):
         campos_actualizados.setdefault(campo, "")
 
     inicializar_firebase()
-
-    # 1) Intentar en la colección del usuario
     ref_user = _ref_user("productos")
-    if ref_user is not None:
-        q_user = ref_user.where("Clave", "==", clave).get()
-        if q_user:
-            ref_user.document(q_user[0].id).update(campos_actualizados)
-            logging.info(f"Producto '{clave}' actualizado (usuario).")
-            _clear_cache()
-            return
+    if ref_user is None:
+        return
 
-    # 2) Intentar en la colección raíz
-    ref_root = _ref_root("productos")
-    q_root = ref_root.where("Clave", "==", clave).get()
-    if q_root:
-        ref_root.document(q_root[0].id).update(campos_actualizados)
-        logging.info(f"Producto '{clave}' actualizado (raíz).")
+    q_user = ref_user.where("Clave", "==", clave).get()
+    if q_user:
+        ref_user.document(q_user[0].id).update(campos_actualizados)
+        logging.info(f"Producto '{clave}' actualizado.")
         _clear_cache()
 
 
@@ -207,9 +245,6 @@ def obtener_id_producto(clave):
     return fila.index[0] if not fila.empty else None
 
 
-# ---------------------------
-# Lecturas públicas (envuelven la cache con uid actual)
-# ---------------------------
 def leer_productos():
     columnas = [
         "Clave", "Nombre", "Marca_Tipo", "Modelo", "Color", "Talla",
@@ -220,74 +255,3 @@ def leer_productos():
     for col in ["Precio Unitario", "Costo Unitario", "Cantidad"]:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
     return df
-
-
-def leer_ventas():
-    columnas = [
-        "Fecha", "Cliente", "Producto", "Clave del Producto",  # <-- ¡Aquí está el cambio!
-        "Cantidad", "Precio Unitario", "Total", "Descuento", "Importe Neto",
-        "Monto Crédito", "Monto Contado", "Anticipo Aplicado", "Método de pago", "Tipo de venta"
-    ]
-    uid = _uid()
-    df = _cached_read_union("ventas", columnas, uid)
-    for col in ["Cantidad", "Precio Unitario", "Total", "Descuento", "Importe Neto",
-                "Monto Crédito", "Monto Contado", "Anticipo Aplicado"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-    return df
-
-
-def leer_transacciones():
-    columnas = ["Fecha", "Descripción", "Categoría", "Tipo", "Monto", "Cliente", "Método de pago"]
-    uid = _uid()
-    df = _cached_read_union("transacciones", columnas, uid)
-    df["Monto"] = pd.to_numeric(df["Monto"], errors="coerce").fillna(0.0)
-    return df
-
-
-
-def leer_cobranza():
-    df = leer_transacciones()
-    return df[df["Categoría"] == "Cobranza"]
-
-
-def calcular_balance_contable():
-    df = leer_transacciones()
-    ingresos = df[df["Tipo"] == "Ingreso"]["Monto"].sum()
-    egresos = df[df["Tipo"] == "Egreso"]["Monto"].sum()
-    return ingresos, egresos, ingresos - egresos
-
-
-def leer_clientes():
-    columnas = ["ID", "Nombre", "Correo", "Teléfono", "Empresa", "RFC", "Límite de crédito"]
-    inicializar_firebase()
-    uid = _uid()
-
-    def _docs_to_df(ref):
-        docs = list(ref.stream())
-        if not docs:
-            return pd.DataFrame(columns=columnas)
-        filas = []
-        for d in docs:
-            data = d.to_dict() or {}
-            data["ID"] = d.id
-            filas.append({c: data.get(c, None) for c in columnas})
-        return pd.DataFrame(filas)
-
-    df_user = _docs_to_df(db.collection("usuarios").document(uid).collection("clientes")) if uid else pd.DataFrame(columns=columnas)
-    df_root = _docs_to_df(_ref_root("clientes"))
-
-    # Usuario primero -> prioridad
-    df = pd.concat([df_user, df_root], ignore_index=True)
-
-    # Asegurar columnas
-    for c in columnas:
-        if c not in df.columns:
-            df[c] = None
-
-    # Dedup por ID si existe
-    if "ID" in df.columns:
-        df = df.drop_duplicates(subset=["ID"], keep="first")
-
-    if "Límite de crédito" in df.columns:
-        df["Límite de crédito"] = pd.to_numeric(df["Límite de crédito"], errors="coerce").fillna(0.0)
-    return df[columnas]
