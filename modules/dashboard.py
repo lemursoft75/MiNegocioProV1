@@ -4,15 +4,17 @@ import plotly.express as px
 import io
 import datetime
 from PIL import Image
-from utils.db import leer_ventas, leer_transacciones, leer_clientes, leer_productos, calcular_balance_contable
+from utils.db import leer_ventas, leer_transacciones, leer_clientes, leer_productos
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ---- Funciones cacheadas ----
+
+# --- Funciones cacheadas ---
 @st.cache_data(ttl=60)
 def get_ventas():
     return pd.DataFrame(leer_ventas())
+
 
 @st.cache_data(ttl=60)
 def get_transacciones():
@@ -21,13 +23,43 @@ def get_transacciones():
         df["Monto"] = pd.to_numeric(df["Monto"], errors="coerce").fillna(0.0)
     return df
 
+
 @st.cache_data(ttl=60)
 def get_clientes():
     return pd.DataFrame(leer_clientes())
 
+
 @st.cache_data(ttl=60)
 def get_productos():
     return pd.DataFrame(leer_productos())
+
+
+# --- FUNCIÓN CORREGIDA PARA CALCULAR EL BALANCE ---
+def calcular_balance_contable():
+    transacciones_df = get_transacciones()
+
+    # Ingresos brutos: ventas al contado + ventas a crédito
+    ingresos_brutos = transacciones_df[
+        (transacciones_df["Tipo"] == "Ingreso") &
+        (transacciones_df["Categoría"].isin(["Ventas", "Ventas a Crédito"]))
+    ]["Monto"].sum()
+
+    # Ingresos reales (flujo de caja): ventas al contado + cobranza
+    ingresos_reales = transacciones_df[
+        (transacciones_df["Tipo"] == "Ingreso") &
+        (transacciones_df["Categoría"].isin(["Ventas", "Cobranza"]))
+    ]["Monto"].sum()
+
+    # Egresos totales
+    egresos_totales = transacciones_df[
+        (transacciones_df["Tipo"] == "Egreso")
+    ]["Monto"].sum()
+
+    # Balance neto
+    balance_neto = ingresos_reales - egresos_totales
+
+    return ingresos_brutos, ingresos_reales, egresos_totales, balance_neto
+
 
 def render():
     # ✅ Verificar sesión antes de continuar
@@ -78,29 +110,21 @@ def render():
     else:
         ventas_df["Total"] = pd.to_numeric(ventas_df["Total"], errors="coerce").fillna(0.0)
 
-    # 🚀 Cálculo de Ingresos y Egresos
-    ingresos_totales, egresos_totales, balance_neto = calcular_balance_contable()
+    # 🚀 Cálculo de Ingresos y Egresos (usando la función corregida)
+    ingresos_brutos_calc, ingresos_reales_calc, egresos_totales_calc, balance_neto_calc = calcular_balance_contable()
 
-    # ✅ Cálculo de ingresos reales (ventas al contado + cobranza)
-    ventas_contado = ventas_df["Monto Contado"].sum() if "Monto Contado" in ventas_df.columns else 0.0
-    cobranza_credito = 0.0
-    if not transacciones_df.empty and "Categoría" in transacciones_df.columns:
-        cobranza_credito = transacciones_df[
-            transacciones_df["Categoría"] == "Cobranza"
-        ]["Monto"].sum()
-    ingresos_reales = ventas_contado + cobranza_credito
-
+    # Muestra las métricas en 4 columnas
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Ingresos Totales", f"${ingresos_totales:,.0f}")
-    col2.metric("Egresos Totales", f"${egresos_totales:,.0f}")
-    col3.metric("Balance Neto", f"${balance_neto:,.0f}")
-    col4.metric("Ingresos Reales", f"${ingresos_reales:,.0f}")
+    col1.metric("Ingresos Brutos", f"${ingresos_brutos_calc:,.0f}")
+    col2.metric("Ingresos Reales (Flujo)", f"${ingresos_reales_calc:,.0f}")
+    col3.metric("Egresos Totales", f"${egresos_totales_calc:,.0f}")
+    col4.metric("Balance Neto", f"${balance_neto_calc:,.0f}")
 
     st.divider()
     st.markdown("### 📈 Composición financiera")
     df_bar = pd.DataFrame({
-        "Categoría": ["Ingresos", "Egresos", "Balance Neto", "Ingresos Reales"],
-        "Monto": [ingresos_totales, egresos_totales, balance_neto, ingresos_reales]
+        "Categoría": ["Ingresos Brutos", "Ingresos Reales", "Egresos Totales", "Balance Neto"],
+        "Monto": [ingresos_brutos_calc, ingresos_reales_calc, egresos_totales_calc, balance_neto_calc]
     })
     st.plotly_chart(px.bar(df_bar, x="Categoría", y="Monto", color="Categoría",
                            template="plotly_white", title="Distribución por tipo"),
@@ -152,14 +176,16 @@ def render():
     st.divider()
     st.markdown("### 📊 Análisis por cliente y producto")
     if not ventas_df.empty:
-        resumen_clientes = ventas_df.groupby("Cliente")["Total"].sum().reset_index().sort_values(by="Total", ascending=False)
+        resumen_clientes = ventas_df.groupby("Cliente")["Total"].sum().reset_index().sort_values(by="Total",
+                                                                                                 ascending=False)
         st.subheader("💼 Ventas por cliente")
         st.dataframe(resumen_clientes, use_container_width=True)
         st.plotly_chart(px.bar(resumen_clientes, x="Cliente", y="Total",
                                title="Ingresos por cliente", template="plotly_white"),
                         use_container_width=True)
 
-        resumen_productos = ventas_df.groupby("Producto")["Cantidad"].sum().reset_index().sort_values(by="Cantidad", ascending=False)
+        resumen_productos = ventas_df.groupby("Producto")["Cantidad"].sum().reset_index().sort_values(by="Cantidad",
+                                                                                                      ascending=False)
         st.subheader("📦 Productos más vendidos (por cantidad)")
         st.dataframe(resumen_productos, use_container_width=True)
         st.plotly_chart(px.bar(resumen_productos, x="Producto", y="Cantidad",
